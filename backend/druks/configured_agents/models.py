@@ -32,6 +32,8 @@ class ConfiguredAgent(Model, Uuid7Pk):
     is_private: Mapped[bool]
     # A tag that names no agent in this Slack channel reaches this agent.
     slack_channel_id: Mapped[str | None] = mapped_column(default=None, unique=True)
+    # Slack shows this image on the agent's replies.
+    picture_url: Mapped[str | None] = mapped_column(default=None)
 
     @classmethod
     async def list_for_account(
@@ -132,6 +134,7 @@ class ConfiguredAgent(Model, Uuid7Pk):
         model: str,
         is_private: bool,
         slack_channel_id: str | None,
+        picture_url: str | None,
     ) -> None:
         """Set every field. Only an admin changes the owner or the Slack channel. Only a
         public agent has a Slack channel: everyone there talks to it."""
@@ -162,6 +165,7 @@ class ConfiguredAgent(Model, Uuid7Pk):
         self.model = model
         self.is_private = is_private
         self.slack_channel_id = slack_channel_id
+        self.picture_url = picture_url
         await session.flush()
 
     async def get_config(self, session: AsyncSession) -> AgentConfig:

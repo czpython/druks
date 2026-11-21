@@ -13,6 +13,8 @@ SLACK_AUTHORITY = "https://slack.com/{team_id}"
 # What the bot does in the workspace. The manifest asks for these.
 SLACK_BOT_SCOPES = (
     "chat:write",
+    # An agent's replies carry its own name and picture.
+    "chat:write.customize",
     "channels:history",
     "channels:read",
     "groups:history",
@@ -32,16 +34,25 @@ class SlackClient(AsyncWebClient):
     file's bytes."""
 
     async def post_markdown(
-        self, channel: str, text: str, *, thread_ts: str = ""
+        self,
+        channel: str,
+        text: str,
+        *,
+        thread_ts: str = "",
+        username: str | None = None,
+        icon_url: str | None = None,
     ) -> AsyncSlackResponse:
         """Post ``text`` as one markdown block, with the same text as the fallback, in a
         thread when ``thread_ts`` names one. A user id as the channel opens the bot's DM
-        with that person."""
+        with that person. ``username`` and ``icon_url`` replace the app's name and
+        picture; Slack accepts them only with the ``chat:write.customize`` scope."""
         return await self.chat_postMessage(
             channel=channel,
             text=text,
             blocks=[{"type": "markdown", "text": text}],
             thread_ts=thread_ts or None,
+            username=username,
+            icon_url=icon_url,
         )
 
     async def list_replies(self, channel: str, thread_ts: str, *, limit: int) -> list[dict]:

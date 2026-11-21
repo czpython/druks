@@ -682,6 +682,13 @@ still reaches that agent, and a message without the tag still reaches nobody. A
 channel has one agent at most. Choose **No channel** to return the channel to
 normal chat.
 
+An agent's replies in Slack show the agent's name. To give an agent a picture,
+paste a public image link under **Picture URL** when you edit the agent. Slack
+loads the image from that link. The Bot's replies, questions with buttons, and
+the bot's own notes, such as the link to connect Slack, keep the app's name and
+picture. The app needs the `chat:write.customize` scope: see
+[Slack](configuration.md#slack).
+
 Another app's bot or a Slack workflow can tag the bot in a room too, after an
 admin accepts it. Druks calls each of them an automation. The first time an
 automation tags the bot, the bot answers in the thread that it does not answer
