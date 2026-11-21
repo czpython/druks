@@ -35,6 +35,13 @@ and in scope for review even on lines the diff leaves alone.
     fall through (negative guards stay for raises and real multi-exit chains)
 14. each new test fails when you revert the source change; delete a test that
     passes without it
+15. no `Any` annotation (`x: Any`, `-> Any`, `dict[str, Any]`): it says
+    nothing, so leave the annotation off
+16. one test per behavior: a test or an assert that runs the same code as
+    another one through another door (a keyword beside a positional, a dump
+    beside a model compare) is a copy; delete it
+17. siblings share one shape: when a call gets a new form, write its siblings in
+    the same hunk the same way
 
 Process: never pipe a test run that gates a commit — run tests as their own step.
 After any scripted edit, grep that it landed. As the last step before commit,
@@ -43,6 +50,7 @@ files for the tells:
 
 - `from … import` inside a `def` (function-level import, no real cycle)
 - `isinstance(` on data we produced
+- `Any` in an annotation
 - `-> … | str` / `| None` used as ok/fail
 - `class X(BaseModel)` with one field
 - `def _helper` used once
@@ -106,6 +114,11 @@ correct one is short, and a newcomer gets it right without reading the source or
 the docs. No exposed internals, no required boilerplate, no ceremony, no knowledge
 of framework mechanics leaking into app code. If the example needs a paragraph of
 setup or a caveat, the surface is wrong — redesign it.
+
+A capability goes on the type, not on some of its uses. When a ticket names some
+of the fields that share a type, change the type, so every field gets it. Leave a
+field out only when the ticket says why. A doc line such as "`List` takes no
+short form" is the caveat that shows you did not.
 
 Before you report done: read every file you touched end to end, not the diff. If
 any line makes you wince, that's the finding — fix it or say it out loud.
