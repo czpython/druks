@@ -1,5 +1,5 @@
 from dbos import DBOS
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AwareDatetime
 
 from druks.accounts.dependencies import current_session_account
@@ -12,6 +12,7 @@ from druks.durable.dbos_state import latest_invocations
 from druks.durable.models import Run, Schedule
 from druks.durable.reads import get_run_response
 from druks.durable.schemas import RunResponse
+from druks.notifications.services import list_notification_channels
 
 router = APIRouter(prefix="/api/configured-agents", tags=["agents"])
 
@@ -82,6 +83,16 @@ async def update_agent(
     account: Account = Depends(current_session_account),
 ) -> ConfiguredAgent:
     agent = await ConfiguredAgent.get_for_account(session, agent_id, account)
+    channel_id = body.slack_channel_id
+    if (
+        channel_id
+        and channel_id != agent.slack_channel_id
+        and channel_id not in [channel["id"] for channel in await list_notification_channels()]
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"The bot is not in {channel_id}. Invite it to the channel first.",
+        )
     await agent.replace(session, editor=account, **body.model_dump())
     return agent
 

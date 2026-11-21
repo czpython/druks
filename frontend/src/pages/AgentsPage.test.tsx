@@ -23,6 +23,7 @@ const reviewer: ConfiguredAgent = {
   model: 'claude-opus',
   isPrivate: false,
   ownerId: 'admin',
+  slackChannelId: null,
 }
 
 function renderPage(account: Account) {
@@ -36,6 +37,7 @@ function renderPage(account: Account) {
 
 beforeEach(() => {
   vi.spyOn(api, 'accounts').mockResolvedValue([admin, member])
+  vi.spyOn(api, 'listNotificationChannels').mockResolvedValue([{ id: 'C1', name: 'security' }])
   vi.spyOn(api, 'skillCollections').mockResolvedValue([
     {
       id: 'collection-1',
@@ -89,7 +91,7 @@ describe('AgentsPage', () => {
     let agents: ConfiguredAgent[] = []
     vi.spyOn(api, 'configuredAgents').mockImplementation(async () => agents)
     const create = vi.spyOn(api, 'createConfiguredAgent').mockImplementation(async (body) => {
-      const agent = { ...body, id: 'agent-2', ownerId: 'member' }
+      const agent = { ...body, id: 'agent-2', ownerId: 'member', slackChannelId: null }
       agents = [agent]
       return agent
     })
@@ -144,7 +146,23 @@ describe('AgentsPage', () => {
         model: 'claude-opus',
         isPrivate: false,
         ownerId: 'member',
+        slackChannelId: null,
       }),
+    )
+  })
+
+  it('lets an admin give an agent a Slack channel', async () => {
+    vi.spyOn(api, 'configuredAgents').mockResolvedValue([reviewer])
+    const update = vi.spyOn(api, 'updateConfiguredAgent').mockResolvedValue(reviewer)
+
+    renderPage(admin)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    await screen.findByRole('option', { name: '#security' })
+    fireEvent.change(screen.getByLabelText('Slack channel'), { target: { value: 'C1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save agent' }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith('agent-1', expect.objectContaining({ slackChannelId: 'C1' })),
     )
   })
 
@@ -155,6 +173,7 @@ describe('AgentsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
 
     expect(screen.queryByLabelText('Owner')).toBeNull()
+    expect(screen.queryByLabelText('Slack channel')).toBeNull()
     const form = screen.getByRole('region', { name: 'Edit agent' })
     expect(within(form).getByText('member@example.com')).toBeTruthy()
   })

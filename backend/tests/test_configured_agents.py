@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from conftest import IDENTITY_HEADER, header_client, seed_note_run
 from druks.accounts.models import Account
@@ -51,7 +52,12 @@ async def test_agent_names_are_unique_in_any_case(tmp_path: Path, druks_db):
         )
         renamed = client.put(
             f"/api/configured-agents/{other.json()['id']}",
-            json={**AGENT, "name": "SECURITY ENGINEER", "ownerId": admin.id},
+            json={
+                **AGENT,
+                "name": "SECURITY ENGINEER",
+                "ownerId": admin.id,
+                "slackChannelId": None,
+            },
             headers=headers,
         )
 
@@ -78,7 +84,7 @@ async def test_another_member_cannot_see_or_change_a_private_agent(tmp_path: Pat
         listed_by_admin = client.get(
             "/api/configured-agents", headers={IDENTITY_HEADER: admin.username}
         )
-        update = {**AGENT, "ownerId": owner.id}
+        update = {**AGENT, "ownerId": owner.id, "slackChannelId": None}
         private_url = f"/api/configured-agents/{private['id']}"
         public_url = f"/api/configured-agents/{public['id']}"
         private_requests = [
@@ -112,18 +118,80 @@ async def test_only_an_admin_changes_the_owner(tmp_path: Path, druks_db):
         url = f"/api/configured-agents/{agent['id']}"
         by_owner = client.put(
             url,
-            json={**AGENT, "ownerId": other.id},
+            json={**AGENT, "ownerId": other.id, "slackChannelId": None},
             headers={IDENTITY_HEADER: owner.username},
         )
         by_admin = client.put(
             url,
-            json={**AGENT, "ownerId": other.id},
+            json={**AGENT, "ownerId": other.id, "slackChannelId": None},
             headers={IDENTITY_HEADER: admin.username},
         )
 
     assert by_owner.status_code == 403
     assert by_admin.status_code == 200
     assert by_admin.json()["ownerId"] == other.id
+
+
+async def test_only_an_admin_gives_an_agent_a_channel_the_bot_is_in(
+    tmp_path: Path, druks_db, monkeypatch
+):
+    channels = AsyncMock(return_value=[{"id": "C1", "name": "security"}])
+    monkeypatch.setattr("druks.configured_agents.routes.list_notification_channels", channels)
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+
+    with header_client(tmp_path) as client:
+        agent = client.post(
+            "/api/configured-agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
+        ).json()
+        url = f"/api/configured-agents/{agent['id']}"
+        update = {**AGENT, "ownerId": owner.id, "slackChannelId": "C1"}
+        by_owner = client.put(url, json=update, headers={IDENTITY_HEADER: owner.username})
+        outside = client.put(
+            url, json={**update, "slackChannelId": "C2"}, headers={IDENTITY_HEADER: admin.username}
+        )
+        by_admin = client.put(url, json=update, headers={IDENTITY_HEADER: admin.username})
+        # The bot has left the channel since: an edit that keeps the channel still saves.
+        channels.return_value = []
+        kept_by_owner = client.put(
+            url, json={**update, "name": "Security"}, headers={IDENTITY_HEADER: owner.username}
+        )
+
+    assert by_owner.status_code == 403
+    assert outside.status_code == 422
+    assert by_admin.json()["slackChannelId"] == "C1"
+    assert kept_by_owner.json()["slackChannelId"] == "C1"
+
+
+async def test_a_channel_has_one_agent_and_only_a_public_one(tmp_path: Path, druks_db, monkeypatch):
+    monkeypatch.setattr(
+        "druks.configured_agents.routes.list_notification_channels",
+        AsyncMock(return_value=[{"id": "C1", "name": "security"}]),
+    )
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    headers = {IDENTITY_HEADER: admin.username}
+
+    with header_client(tmp_path) as client:
+        first = client.post("/api/configured-agents", json=AGENT, headers=headers).json()
+        second = client.post(
+            "/api/configured-agents", json={**AGENT, "name": "Writer"}, headers=headers
+        ).json()
+        bound = {**AGENT, "ownerId": admin.id, "slackChannelId": "C1"}
+        client.put(f"/api/configured-agents/{first['id']}", json=bound, headers=headers)
+        taken = client.put(
+            f"/api/configured-agents/{second['id']}",
+            json={**bound, "name": "Writer"},
+            headers=headers,
+        )
+        private = client.put(
+            f"/api/configured-agents/{first['id']}",
+            json={**bound, "isPrivate": True},
+            headers=headers,
+        )
+
+    assert taken.status_code == 422
+    assert "Security engineer" in taken.json()["detail"]
+    assert private.status_code == 422
 
 
 async def test_an_agent_takes_enabled_skills_and_a_harness_that_runs_it(tmp_path: Path, druks_db):

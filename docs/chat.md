@@ -640,6 +640,14 @@ and the tag rule below. Name an agent you cannot talk to, and the bot says why
 in the thread and drops the message. The same tag works in a direct message,
 where a name without the tag reaches the Bot.
 
+An admin can give a public agent one Slack channel, under **Slack channel**
+when they edit the agent. The bot must be in the channel. In that channel, a tag
+that names no agent reaches that agent, unless you already have a conversation
+in the thread, with an agent or with the Bot. A tag that names another agent
+still reaches that agent, and a message without the tag still reaches nobody. A
+channel has one agent at most. Choose **No channel** to return the channel to
+normal chat.
+
 Tell the agent to answer only when you tag it, and your untagged replies in that
 thread stop reaching it. The agent records your choice with `chat_require_tag`.
 Tell it to answer your replies again, and they reach it again for the rest of the

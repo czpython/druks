@@ -350,8 +350,8 @@ def test_the_manifest_sends_button_clicks_to_the_interactivity_webhook():
     assert match_webhook(path)[0] is SlackInteractivity
 
 
-def room_event(user=ANA, text=f"<@{BOT}> read my runs", ts="10.0", **event):
-    return message_event(user, text, ts, channel="C1", channel_type="channel", **event)
+def room_event(user=ANA, text=f"<@{BOT}> read my runs", ts="10.0", channel="C1", **event):
+    return message_event(user, text, ts, channel=channel, channel_type="channel", **event)
 
 
 class Answer(dict):
@@ -459,6 +459,24 @@ async def create_agent(session, owner, name, *, is_private=False):
         model="anthropic/claude-opus-4-7",
         is_private=is_private,
     )
+
+
+async def bind_channel(session, agent, channel_id):
+    """Give the agent the channel as its owner, an admin, does on the agent's page."""
+    await agent.replace(
+        session,
+        editor=await Account.get(session, id=agent.owner_id),
+        owner_id=agent.owner_id,
+        name=agent.name,
+        description=agent.description,
+        instructions=agent.instructions,
+        skills=agent.skills,
+        harness=agent.harness,
+        model=agent.model,
+        is_private=agent.is_private,
+        slack_channel_id=channel_id,
+    )
+    await session.commit()
 
 
 async def test_a_tag_reaches_the_agent_whose_longest_name_follows_it(
@@ -586,6 +604,41 @@ async def test_a_bare_tag_does_not_hold_the_persons_later_tags_in_normal_chat(
         "Security engineer check this PR",
         "and the tests?",
     ]
+
+
+async def test_a_tag_naming_no_agent_in_a_channel_reaches_the_channels_agent(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    writer = await create_agent(druks_db, ana, "Writer")
+    await bind_channel(druks_db, engineer, "C1")
+
+    await receive(room_event(text=f"<@{BOT}> check this PR"))
+    await receive(room_event(text=f"<@{BOT}> Writer draft the notes", ts="20.0"))
+    await receive(room_event(text=f"<@{BOT}> make it shorter", ts="21.0", thread_ts="20.0"))
+    await receive(room_event(text=f"<@{BOT}> check this PR", ts="30.0", channel="C2"))
+
+    conversations = await Conversation.list_for_connection(druks_db, card.id)
+    assert sorted((chat.thread_id, chat.agent_id or "") for chat in conversations) == [
+        ("C1:10.0", engineer.id),
+        ("C1:20.0", writer.id),
+        ("C2:30.0", ""),
+    ]
+
+
+async def test_a_channel_without_its_agent_returns_to_normal_chat(card, druks_db, slack, delivery):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    await bind_channel(druks_db, engineer, "C1")
+    await bind_channel(druks_db, engineer, None)
+
+    await receive(room_event(text=f"<@{BOT}> check this PR"))
+
+    [conversation] = await Conversation.list_for_connection(druks_db, card.id)
+    assert not conversation.agent_id
 
 
 async def test_a_tag_naming_someone_elses_private_agent_is_refused_in_the_thread(
