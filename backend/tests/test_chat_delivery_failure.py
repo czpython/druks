@@ -216,6 +216,7 @@ async def test_a_turn_fails_without_a_retry_once_a_public_agent_turns_private(
         editor=owner,
         owner_id=owner.id,
         slack_channel_id=None,
+        picture_url=None,
         **{**AGENT, "is_private": True},
     )
     message = await conversation.get_unanswered_message(druks_db)

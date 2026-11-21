@@ -24,6 +24,7 @@ const reviewer: ConfiguredAgent = {
   isPrivate: false,
   ownerId: 'admin',
   slackChannelId: null,
+  pictureUrl: null,
 }
 
 function renderPage(account: Account) {
@@ -91,7 +92,7 @@ describe('AgentsPage', () => {
     let agents: ConfiguredAgent[] = []
     vi.spyOn(api, 'configuredAgents').mockImplementation(async () => agents)
     const create = vi.spyOn(api, 'createConfiguredAgent').mockImplementation(async (body) => {
-      const agent = { ...body, id: 'agent-2', ownerId: 'member', slackChannelId: null }
+      const agent = { ...body, id: 'agent-2', ownerId: 'member', slackChannelId: null, pictureUrl: null }
       agents = [agent]
       return agent
     })
@@ -147,6 +148,7 @@ describe('AgentsPage', () => {
         isPrivate: false,
         ownerId: 'member',
         slackChannelId: null,
+        pictureUrl: null,
       }),
     )
   })
@@ -163,6 +165,25 @@ describe('AgentsPage', () => {
 
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith('agent-1', expect.objectContaining({ slackChannelId: 'C1' })),
+    )
+  })
+
+  it('lets the owner give their agent a picture', async () => {
+    vi.spyOn(api, 'configuredAgents').mockResolvedValue([{ ...reviewer, ownerId: 'member' }])
+    const update = vi.spyOn(api, 'updateConfiguredAgent').mockResolvedValue(reviewer)
+
+    renderPage(member)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByLabelText('Picture URL'), {
+      target: { value: 'https://example.com/reviewer.png' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save agent' }))
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        'agent-1',
+        expect.objectContaining({ pictureUrl: 'https://example.com/reviewer.png' }),
+      ),
     )
   })
 

@@ -749,11 +749,11 @@ install it from Druks.
    Slack's first check ran before the card held the signing secret, so Druks
    refused it.
 
-The manifest asks for the bot scopes `chat:write`, `channels:history`,
-`channels:read`, `groups:history`, `groups:read`, `im:history`, `mpim:history`,
-`users:read`, `files:read`, and `reactions:write`. It subscribes the bot to direct
-messages, to the rooms it is invited to, and to joins in those rooms. It leaves
-token rotation off and names these URLs:
+The manifest asks for the bot scopes `chat:write`, `chat:write.customize`,
+`channels:history`, `channels:read`, `groups:history`, `groups:read`,
+`im:history`, `mpim:history`, `users:read`, `files:read`, and `reactions:write`.
+It subscribes the bot to direct messages, to the rooms it is invited to, and to
+joins in those rooms. It leaves token rotation off and names these URLs:
 
 Events URL:
 `https://<webhook-host>/_external/slack/events/`
@@ -773,6 +773,12 @@ An app created from an earlier manifest needs `reactions:write` and the
 Interactivity URL. Add the scope under **OAuth & Permissions** and reinstall the
 app. Under **Interactivity & Shortcuts**, turn on Interactivity and set the
 Request URL to the Interactivity URL.
+
+An app created before agents had names in Slack needs `chat:write.customize`.
+With it, an agent's replies show the agent's name and picture instead of the
+app's. Add the scope under **OAuth & Permissions**, then select **Install** on
+the Slack card again. Druks reads the scopes from that install. Until then, an
+agent's replies arrive under the app's name.
 
 ## Speech to text
 

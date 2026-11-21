@@ -33,7 +33,7 @@ const conversation: Conversation = {
 const admin: Account = { id: 'admin', username: 'admin@example.com', isDefault: true, role: 'admin' }
 const reviewer: ConfiguredAgent = {
   id: 'agent-1', name: 'Reviewer', description: 'Reviews pull requests', instructions: 'Be brief.',
-  skills: [], harness: 'claude', model: 'claude-opus', isPrivate: true, ownerId: 'admin', slackChannelId: null,
+  skills: [], harness: 'claude', model: 'claude-opus', isPrivate: true, ownerId: 'admin', slackChannelId: null, pictureUrl: null,
 }
 
 function mount(path = `/chat/${conversation.id}`, timezone?: string) {

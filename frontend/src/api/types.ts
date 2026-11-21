@@ -678,6 +678,7 @@ export interface ConfiguredAgentInput {
   isPrivate: boolean
   ownerId: string
   slackChannelId: string | null
+  pictureUrl: string | null
 }
 
 export interface ConfiguredAgent extends ConfiguredAgentInput {

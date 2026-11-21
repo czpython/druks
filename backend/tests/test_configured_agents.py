@@ -36,6 +36,25 @@ async def test_a_member_creates_an_agent_and_owns_it(tmp_path: Path, druks_db):
     assert listed.json() == [created.json()]
 
 
+async def test_the_owner_gives_an_agent_a_picture(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    headers = {IDENTITY_HEADER: member.username}
+    picture = "https://example.com/security.png"
+
+    with header_client(tmp_path) as client:
+        agent = client.post("/api/configured-agents", json=AGENT, headers=headers).json()
+        url = f"/api/configured-agents/{agent['id']}"
+        client.put(
+            url,
+            json={**AGENT, "ownerId": member.id, "slackChannelId": None, "pictureUrl": picture},
+            headers=headers,
+        )
+        fetched = client.get(url, headers=headers)
+
+    assert fetched.json()["pictureUrl"] == picture
+
+
 async def test_agent_names_are_unique_in_any_case(tmp_path: Path, druks_db):
     admin = await Account.get_or_create(druks_db, "admin@example.com")
     headers = {IDENTITY_HEADER: admin.username}
@@ -57,6 +76,7 @@ async def test_agent_names_are_unique_in_any_case(tmp_path: Path, druks_db):
                 "name": "SECURITY ENGINEER",
                 "ownerId": admin.id,
                 "slackChannelId": None,
+                "pictureUrl": None,
             },
             headers=headers,
         )
@@ -84,7 +104,7 @@ async def test_another_member_cannot_see_or_change_a_private_agent(tmp_path: Pat
         listed_by_admin = client.get(
             "/api/configured-agents", headers={IDENTITY_HEADER: admin.username}
         )
-        update = {**AGENT, "ownerId": owner.id, "slackChannelId": None}
+        update = {**AGENT, "ownerId": owner.id, "slackChannelId": None, "pictureUrl": None}
         private_url = f"/api/configured-agents/{private['id']}"
         public_url = f"/api/configured-agents/{public['id']}"
         private_requests = [
@@ -118,12 +138,12 @@ async def test_only_an_admin_changes_the_owner(tmp_path: Path, druks_db):
         url = f"/api/configured-agents/{agent['id']}"
         by_owner = client.put(
             url,
-            json={**AGENT, "ownerId": other.id, "slackChannelId": None},
+            json={**AGENT, "ownerId": other.id, "slackChannelId": None, "pictureUrl": None},
             headers={IDENTITY_HEADER: owner.username},
         )
         by_admin = client.put(
             url,
-            json={**AGENT, "ownerId": other.id, "slackChannelId": None},
+            json={**AGENT, "ownerId": other.id, "slackChannelId": None, "pictureUrl": None},
             headers={IDENTITY_HEADER: admin.username},
         )
 
@@ -145,7 +165,7 @@ async def test_only_an_admin_gives_an_agent_a_channel_the_bot_is_in(
             "/api/configured-agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
         ).json()
         url = f"/api/configured-agents/{agent['id']}"
-        update = {**AGENT, "ownerId": owner.id, "slackChannelId": "C1"}
+        update = {**AGENT, "ownerId": owner.id, "slackChannelId": "C1", "pictureUrl": None}
         by_owner = client.put(url, json=update, headers={IDENTITY_HEADER: owner.username})
         outside = client.put(
             url, json={**update, "slackChannelId": "C2"}, headers={IDENTITY_HEADER: admin.username}
@@ -176,7 +196,7 @@ async def test_a_channel_has_one_agent_and_only_a_public_one(tmp_path: Path, dru
         second = client.post(
             "/api/configured-agents", json={**AGENT, "name": "Writer"}, headers=headers
         ).json()
-        bound = {**AGENT, "ownerId": admin.id, "slackChannelId": "C1"}
+        bound = {**AGENT, "ownerId": admin.id, "slackChannelId": "C1", "pictureUrl": None}
         client.put(f"/api/configured-agents/{first['id']}", json=bound, headers=headers)
         taken = client.put(
             f"/api/configured-agents/{second['id']}",

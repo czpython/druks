@@ -226,14 +226,21 @@ class SlackChannel(Channel):
         cls, session: AsyncSession, conversation: Conversation, reply: Message
     ) -> None:
         """Post the reply where the conversation lives, in pieces that fit a markdown
-        block. The first piece's Slack id is the reply's source id."""
+        block. The first piece's Slack id is the reply's source id. An agent's reply
+        shows the agent's name and picture."""
         client = SlackClient(token=await Slack.get_bot_token())
         room, _, thread_ts = conversation.thread_id.partition(":")
+        # Slack takes a custom name only with the scope. A workspace that has not
+        # approved the app again gets the reply under the app's own name.
+        grant = await Slack.get_grant()
+        agent = conversation.agent if "chat:write.customize" in grant.scopes else None
         posted = [
             await client.post_markdown(
                 room or conversation.user_id,
                 reply.answer[start : start + REPLY_PIECE_CHARACTERS],
                 thread_ts=thread_ts,
+                username=agent.name if agent else None,
+                icon_url=agent.picture_url if agent else None,
             )
             for start in range(0, len(reply.answer), REPLY_PIECE_CHARACTERS)
         ]

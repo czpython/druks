@@ -61,6 +61,27 @@ async def card(druks_db):
 
 
 @pytest.fixture
+async def card_with_names(druks_db):
+    """The install after the workspace approved the app's custom names."""
+    bind_ambient_session(druks_db)
+    row = await install_service(
+        "slack",
+        access_token="xoxb-1",
+        identity={
+            "client_id": "c1",
+            "team": "Acme",
+            "team_id": "T1",
+            "bot_name": "druks",
+            "bot_user_id": BOT,
+        },
+        secrets={"client_secret": "cs", "signing_secret": "ss"},
+        scopes=("chat:write", "chat:write.customize"),
+    )
+    await druks_db.commit()
+    return row
+
+
+@pytest.fixture
 def slack(monkeypatch):
     """Slack's Web API, answered locally. Records each call's method and arguments."""
     calls = []
@@ -237,6 +258,62 @@ async def test_a_reply_posts_markdown_in_pieces_and_records_its_slack_id(card, d
         for method, sent in slack
     ] == [("chat.postMessage", ANA, 12_000, "markdown"), ("chat.postMessage", ANA, 1, "markdown")]
     assert reply.source_id == "D1:1.0"
+
+
+async def reply_in_slack(session, card, account, agent):
+    conversation = await Conversation.get_or_create_for_user(
+        session,
+        card,
+        account.id,
+        source=ConversationSource.SLACK,
+        user_id=ANA,
+        user_name="",
+        user_phone="",
+        thread_id="C1:1.0",
+        agent_id=agent.id if agent else None,
+    )
+    reply = await conversation.create_message(session, "Done", role=MessageRole.ASSISTANT)
+    await SlackChannel.send_reply(session, conversation, reply)
+
+
+async def test_an_agents_reply_shows_its_name_and_picture_and_the_bots_shows_neither(
+    card_with_names, druks_db, slack
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    agent = await create_agent(druks_db, ana, "Security engineer")
+    await agent.replace(
+        druks_db,
+        editor=ana,
+        owner_id=ana.id,
+        name=agent.name,
+        description=agent.description,
+        instructions=agent.instructions,
+        skills=agent.skills,
+        harness=agent.harness,
+        model=agent.model,
+        is_private=agent.is_private,
+        slack_channel_id=None,
+        picture_url="https://example.com/security.png",
+    )
+
+    await reply_in_slack(druks_db, card_with_names, ana, agent)
+    await reply_in_slack(druks_db, card_with_names, ana, None)
+
+    assert [(sent.get("username"), sent.get("icon_url")) for _, sent in slack] == [
+        ("Security engineer", "https://example.com/security.png"),
+        (None, None),
+    ]
+
+
+async def test_an_agents_reply_comes_from_the_app_until_the_workspace_approves_names(
+    card, druks_db, slack
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    agent = await create_agent(druks_db, ana, "Security engineer")
+
+    await reply_in_slack(druks_db, card, ana, agent)
+
+    assert [("username" in sent, "icon_url" in sent) for _, sent in slack] == [(False, False)]
 
 
 async def test_delivery_reacts_with_eyes_to_each_message_from_slack(
@@ -475,6 +552,7 @@ async def bind_channel(session, agent, channel_id):
         model=agent.model,
         is_private=agent.is_private,
         slack_channel_id=channel_id,
+        picture_url=agent.picture_url,
     )
     await session.commit()
 

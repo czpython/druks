@@ -74,6 +74,7 @@ export function AgentsPage({ account }: { account: Account }) {
       isPrivate: true,
       ownerId: account.id,
       slackChannelId: null,
+      pictureUrl: null,
     })
     setEditingAgentId(null)
     setError(null)
@@ -101,8 +102,9 @@ export function AgentsPage({ account }: { account: Account }) {
     setBusy(true)
     setError(null)
     try {
-      const { ownerId, slackChannelId, ...input } = agent
-      if (editingAgentId) await api.updateConfiguredAgent(editingAgentId, { ...input, ownerId, slackChannelId })
+      const { ownerId, slackChannelId, pictureUrl, ...input } = agent
+      if (editingAgentId)
+        await api.updateConfiguredAgent(editingAgentId, { ...input, ownerId, slackChannelId, pictureUrl })
       else await api.createConfiguredAgent(input)
       await queryClient.invalidateQueries({ queryKey: ['configuredAgents'] })
       setDraft(null)
@@ -290,6 +292,16 @@ export function AgentsPage({ account }: { account: Account }) {
               <span>{usernames.get(draft.ownerId)}</span>
             )}
           </Field>
+          {editingAgentId && (
+            <Field label="Picture URL" help="A public link to an image. Slack shows it on the agent's replies.">
+              <TextInput
+                aria-label="Picture URL"
+                value={draft.pictureUrl ?? ''}
+                onChange={(event) => setDraft({ ...draft, pictureUrl: event.target.value || null })}
+                disabled={busy}
+              />
+            </Field>
+          )}
           {isAdmin && editingAgentId && (
             <Field
               label="Slack channel"
