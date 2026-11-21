@@ -8,6 +8,8 @@ import { useSSE } from '../api/sse'
 import type { EventFilters, FeedItem, FeedResponse } from '../api/types'
 import { appLabel, getAppUI } from '../apps/registry'
 import { Markdown } from '../components/Markdown'
+import { AppPagesProvider } from '../druksui/AppPage'
+import { Blocks } from '../druksui/Blocks'
 import { Menu } from '../components/Menu'
 import { Page } from '../components/Page'
 import { activityDay, activityTypeLabel, eventLine } from '../lib/feed'
@@ -430,7 +432,8 @@ function ActivityDetail({ event }: { event: FeedItem }) {
     {request && <section className="activity-request" aria-label="Recorded request">
       <h3>Input was requested</h3>
       {request.label && <p>{request.label}</p>}
-      {request.context && <Markdown source={request.context} />}
+      {typeof request.context === 'string' && request.context && <Markdown source={request.context} />}
+      {Array.isArray(request.context) && <AppPagesProvider app={event.app ?? ''}><Blocks blocks={request.context} /></AppPagesProvider>}
       {request.questions?.map((question) => <div key={question.id}>
         <p>{question.prompt}</p><ul>{question.options.map((option) => <li key={option.id}>{option.label}</li>)}</ul>
       </div>)}

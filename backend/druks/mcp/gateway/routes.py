@@ -63,7 +63,7 @@ async def answer_gate(
     """Answer the gate get_gate showed, resuming the run. parkedAt must echo
     get_gate's value unchanged; a repeat answer to the same parkedAt reports
     already_answered. Empty request_changes is valid only when get_gate's ask
-    has non-blank context."""
+    has context: text that is not blank, or a list of one or more blocks."""
     return await services.answer_gate(
         session,
         run,

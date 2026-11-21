@@ -178,6 +178,19 @@ export function AppPage({ app, page }: { app: string; page: string }) {
   )
 }
 
+/** The pages of ``app`` from the roster, for its blocks outside its own pages. */
+export function AppPagesProvider({ app, children }: { app: string; children: ReactNode }) {
+  const roster = useQuery({ queryKey: ['apps'], queryFn: api.listApps, staleTime: 60_000 })
+  const installed = roster.data?.find((entry) => entry.name === app)
+  return (
+    <PagesContext.Provider
+      value={{ app, pages: installed?.pages ?? [], operations: installed?.operations ?? [] }}
+    >
+      {children}
+    </PagesContext.Provider>
+  )
+}
+
 // Every page about one subject reaches that subject's own page, where the
 // timeline of its runs lives.
 function TimelineLink({ subject }: { subject: Follows }) {

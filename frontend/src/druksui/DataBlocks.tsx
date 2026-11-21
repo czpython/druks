@@ -62,7 +62,10 @@ export function Datum({ value }: { value: Value }) {
 const STOPPED = ['failed', 'cancelled', 'orphaned']
 const WORKING = ['scheduled', 'running']
 
-function subjectStatusWord({ status: { state, gate }, working }: SubjectStatusValue): [string, StatusValue['tone']] {
+function subjectStatusWord(
+  { state, gate }: NonNullable<SubjectStatusValue['status']>,
+  working: string,
+): [string, StatusValue['tone']] {
   if (gate) return ['needs you', 'warning']
   if (state && STOPPED.includes(state)) return [state, 'danger']
   if (state && WORKING.includes(state)) return [working, 'active']
@@ -71,14 +74,15 @@ function subjectStatusWord({ status: { state, gate }, working }: SubjectStatusVa
 
 /** Where the work on one subject stands: the shell's word for the run, the
  * app's verb while it works, and the message of a run that stopped. */
-function SubjectStatus({ value }: { value: SubjectStatusValue }) {
-  const [label, tone] = subjectStatusWord(value)
-  const status = <span className={`dui-status dui-status-${tone}`}>{label}</span>
-  if (!value.status.failure) return status
+function SubjectStatus({ value: { status, working } }: { value: SubjectStatusValue }) {
+  if (!status) return null
+  const [label, tone] = subjectStatusWord(status, working)
+  const word = <span className={`dui-status dui-status-${tone}`}>{label}</span>
+  if (!status.failure) return word
   return (
     <span className="dui-value">
-      {status}
-      <span className="dui-value-desc dim">{value.status.failure}</span>
+      {word}
+      <span className="dui-value-desc dim">{status.failure}</span>
     </span>
   )
 }

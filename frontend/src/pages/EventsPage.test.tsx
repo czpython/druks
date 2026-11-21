@@ -261,12 +261,40 @@ it('shows past request facts and preserves filters and selection after returning
   const owner = await screen.findByRole('link', { name: 'Open work' })
   expect(new URL(owner.getAttribute('href')!, window.location.origin).searchParams.get('parkedAt')).toBe('2026-09-09T15:00:00.123456Z')
   expect(screen.getByText('Input was requested')).toBeTruthy()
+  expect(screen.getByText('Recorded context')).toBeTruthy()
   fireEvent.click(owner)
   await screen.findByRole('heading', { name: 'Owner page' })
   act(() => navigate(returnUrl))
   await screen.findByRole('complementary')
   expect(screen.getByRole('searchbox')).toHaveProperty('value', 'Pump')
   expect(new URLSearchParams(window.location.search).get('selected')).toBe('10')
+})
+
+it('shows a recorded block context through the app pages, with no status it never recorded', async () => {
+  vi.mocked(api.listApps).mockResolvedValue([{ ...app, pages: [
+    { name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 0, subjectType: 'note' },
+  ] }])
+  const note = { block: 'link' as const, label: '', page: 'note', arguments: { note_id: '7' }, url: '', subject: null }
+  history.mockResolvedValue({ items: [{ ...result, topic: 'workflow.parked',
+    payload: { ...result.payload, artifact_id: null, gate: 'review',
+      input_requested_at: '2026-09-09T15:00:00.123456Z', input_request: {
+      presentation: 'in_app', controls: [{ id: 'approve', note_required: false }], context: [
+        { block: 'facts', title: '', facts: [
+          { label: 'Pump', value: { value: 'text', text: 'Pump A', description: '', link: note } },
+          { label: 'Work', value: { value: 'subject_status', subject: { subjectType: 'note', subjectId: '7' }, working: 'summarizing' } },
+        ] },
+        { block: 'table', title: 'Readings', columns: [{ label: 'Hour', align: 'start' }], empty: null, select: '', actions: [],
+          rows: [{ cells: [{ value: 'number', number: 3, unit: 'bar', tone: 'neutral' }], detail: '', key: '' }] },
+      ],
+    } } }], cursor: '10:20:10', nextCursor: null })
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: /Pump A.*Input requested/ }))
+
+  const request = await screen.findByRole('region', { name: 'Recorded request' })
+  expect((await within(request).findByRole('link', { name: 'Pump A' })).getAttribute('href')).toBe('/field_notes/notes/7')
+  expect(within(request).getByText('Work')).toBeTruthy()
+  expect(within(request).queryByText(/needs you|summarizing|idle/)).toBeNull()
+  expect(within(within(request).getByRole('table', { name: 'Readings' })).getByText('bar')).toBeTruthy()
 })
 
 it('retries the exact saved artifact and replaces it on another selection', async () => {

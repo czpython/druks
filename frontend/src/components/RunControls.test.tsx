@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { InputRequest } from '../api/types'
+import type { Block, InputRequest } from '../api/types'
+import { PagesContext } from '../druksui/pages'
 import { CancelRun, InAppReview, RetryRun } from './RunControls'
 
 function stubFetch() {
@@ -86,6 +87,93 @@ describe('InAppReview', () => {
     }
 
     expect(requestChanges.disabled).toBe(false)
+  })
+
+  it('keeps a text context as markdown', () => {
+    stubFetch()
+    renderReview({
+      presentation: 'in_app',
+      controls: [{ id: 'approve', note_required: false }],
+      context: 'Name the **rollback** boundary.',
+    })
+
+    expect(screen.getByText('rollback').tagName).toBe('STRONG')
+  })
+
+  it('draws a block context, and its links reach the pages the caller supplies', () => {
+    stubFetch()
+    const context: Block[] = [
+      {
+        block: 'facts',
+        title: 'The note',
+        facts: [
+          { label: 'Body', value: { value: 'text', text: 'Fan noise on rack 3.', description: '', link: null } },
+          {
+            label: 'Work',
+            value: {
+              value: 'subject_status',
+              subject: { subjectType: 'note', subjectId: '7' },
+              working: 'summarizing',
+              status: {
+                state: 'parked',
+                run: 'run-123',
+                kind: 'field_notes.summarize',
+                agent: null,
+                gate: 'review',
+                failure: null,
+                reason: null,
+                triggeredAt: null,
+                accountUsername: null,
+              },
+            },
+          },
+        ],
+      },
+      {
+        block: 'table',
+        title: 'Notes',
+        columns: [{ label: 'Note', align: 'start' }],
+        rows: [
+          {
+            cells: [
+              {
+                value: 'text',
+                text: 'Note 7',
+                description: '',
+                link: { block: 'link', label: '', page: 'note', arguments: { note_id: '7' }, url: '', subject: null },
+              },
+            ],
+            detail: '',
+            key: '',
+          },
+        ],
+        empty: null,
+        select: '',
+        actions: [],
+      },
+    ]
+    render(
+      <PagesContext.Provider
+        value={{
+          app: 'field_notes',
+          pages: [
+            { name: 'note', label: 'note', path: '/field_notes/notes/{note_id}', parent: '', order: 0, subjectType: 'note' },
+          ],
+          operations: [],
+        }}
+      >
+        <InAppReview
+          runId="run-123"
+          ask={{ presentation: 'in_app', controls: [{ id: 'approve', note_required: false }], context }}
+        />
+      </PagesContext.Provider>,
+    )
+
+    expect(screen.getByText('Fan noise on rack 3.')).toBeTruthy()
+    expect(screen.getByText('needs you')).toBeTruthy()
+    expect(screen.getByRole('table', { name: 'Notes' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Note 7' }).getAttribute('href')).toBe('/field_notes/notes/7')
+    expect(screen.queryByText('Critique')).toBeNull()
   })
 
   it('shows the app-declared label with its controls', () => {

@@ -1,14 +1,11 @@
 from collections.abc import Iterator
-from typing import TypeVar
 
 from pydantic import Field, model_validator
 
 from druks.schemas import Schema
 
-from .blocks import Action, Block, Columns, Link, Watched
+from .blocks import Action, Block, Columns, Link, Part, Watched, iter_parts
 from .fields import Field as PageField
-
-Part = TypeVar("Part", bound=Schema)
 
 
 class Page(Schema):
@@ -44,13 +41,4 @@ class Page(Schema):
     def iter_parts(self, *kinds: type[Part]) -> Iterator[Part]:
         """Every block, value, and control of ``kinds`` on the page, however deep,
         in the order the page holds them."""
-
-        def walk(part: Schema) -> Iterator[Part]:
-            for _, value in part:
-                for child in value if isinstance(value, list) else [value]:
-                    if isinstance(child, Schema):
-                        if isinstance(child, kinds):
-                            yield child
-                        yield from walk(child)
-
-        return walk(self)
+        return iter_parts([self], *kinds)

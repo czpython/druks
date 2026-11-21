@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 from conftest import bind_ambient_session, install_service
+from druks import ui
 from druks.accounts.models import Account
 from druks.chat.channels.slack.channel import SlackChannel
 from druks.chat.enums import ConversationSource
@@ -18,7 +19,9 @@ from druks.notifications.exceptions import (
     MalformedButtonError,
 )
 from druks.notifications.models import Notification
+from druks.settings import configure_settings, get_settings
 from druks.testing import seed_call, seed_run
+from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from slack_sdk.errors import SlackApiError
 
@@ -264,11 +267,12 @@ async def test_delivery_to_a_user_shows_the_message_to_that_person_only(slack):
     assert post["blocks"] == [{"type": "markdown", "text": post["text"]}]
 
 
-async def _parked_review(druks_db, *, document: str = "", **ask) -> Run:
+async def _parked_review(druks_db, *, document: str = "", subject=None, **ask) -> Run:
     """A run parked on an in-app review. Its call wrote ``document`` as the run's artifact."""
     run = await seed_run(
         druks_db,
         kind=Summarize.kind,
+        subject=subject,
         state="parked",
         input_gate="review",
         input_request={
@@ -337,3 +341,41 @@ async def test_an_approval_whose_document_is_gone_goes_out_without_it(druks_db):
     rendered = await run.get_rendered_ask(has_chat=False)
 
     assert rendered["body"] == "# Review: Plan\n\nCheck the schema."
+
+
+async def test_an_approval_writes_a_block_context_as_a_list_and_a_table(druks_db, slack):
+    settings = get_settings()
+    urls = settings.urls.model_copy(update={"endpoint": "https://druks.example"})
+    configure_settings(settings.model_copy(update={"urls": urls}))
+    note = await Note.create(body="Fan noise on rack 3.")
+    context = [
+        ui.Facts(
+            [
+                ui.Fact("Note", ui.TextValue("Rack 3", link=ui.Link(subject=note))),
+                ui.Fact("Work", ui.SubjectStatus(note)),
+            ]
+        ),
+        ui.Table(
+            columns=[ui.TableColumn("Fan"), ui.TableColumn("Speed", align="end")],
+            rows=[ui.TableRow(["front", ui.NumberValue(1200, unit="rpm")])],
+        ),
+    ]
+    # The ask stores the blocks as review writes them, and reads the status when it is read.
+    run = await _parked_review(
+        druks_db,
+        subject=note,
+        context=[block.model_dump(mode="json", by_alias=True) for block in context],
+    )
+
+    rendered = await run.get_rendered_ask(has_chat=False)
+    await deliver(SlackClient(token=_BOT_TOKEN), "C1", rendered["body"])
+
+    body = (
+        "# Review\n\n"
+        f"- **Note**: [Rack 3](https://druks.example/field_notes/notes/{note.id})\n"
+        "- **Work**: needs you\n\n"
+        "| Fan | Speed |\n| --- | ---: |\n| front | 1,200 rpm |"
+    )
+    assert rendered["body"] == body
+    (post,) = slack.posts
+    assert post["blocks"] == [{"type": "markdown", "text": body}]

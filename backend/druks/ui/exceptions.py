@@ -22,3 +22,15 @@ class PageReadError(DruksError):
 class PageContractError(PageReadError):
     """The page a function returned breaks the contract. Druks wrote this
     message, so the dashboard shows it whole."""
+
+
+class NoTextFormError(DruksError):
+    """A block that the operator acts through has no text form. Raised by its
+    ``to_markdown()``, and by ``review`` for a context that holds one."""
+
+    def __init__(self, block: str) -> None:
+        super().__init__(
+            f"{block} has no text form, so a review context cannot hold it. "
+            f"Take the {block} out of the context, and show it on a page instead."
+        )
+        self.block = block

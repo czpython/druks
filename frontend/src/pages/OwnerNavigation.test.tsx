@@ -12,6 +12,8 @@ import { SubjectPage } from './SubjectPage'
 
 vi.mock('../api/sse', () => ({ useSSE: vi.fn() }))
 vi.mock('../api/client', () => ({
+  // The decision controls read the run's app pages from the roster.
+  api: { listApps: vi.fn(async () => []) },
   subjectApi: {
     read: vi.fn(),
     stream: vi.fn(() => '/stream'),

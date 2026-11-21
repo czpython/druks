@@ -433,6 +433,55 @@ the word:
 - the `working` word while Druks works on the subject,
 - "idle" otherwise.
 
+Druks reads a `SubjectStatus` in a review's
+[context of blocks](writing-an-app.md#wait-for-input) in the same way, from the
+runs of the app that asks. It reads the status each time it reads the ask: for
+the dashboard, for `get_gate`, and for a chat agent. It reads the status once for
+the approval, when the run parks. The ask that Druks stores, and the event that
+records the ask, hold no status, so a recorded request on the Activity page shows
+none.
+
+## Text forms
+
+An approval in Slack is text, so every block and value but three has a text
+form. `to_markdown()` writes it as markdown that names no channel. Druks writes
+the blocks of a review's context this way.
+
+| Block or value | Text form |
+| --- | --- |
+| `Text`, `Markdown` | The text as written. |
+| `Quote`, `Callout` | A block quote. The title of a callout is in bold. |
+| `Divider` | A rule. |
+| `Section`, `Card`, `Cards`, `Stack`, `Columns` | The blocks inside, in order. A title becomes a heading. |
+| `Facts`, `Metrics` | A list: each label in bold, then its value. |
+| `List` | A list. |
+| `Table` | A markdown table. The row detail stays on the dashboard. |
+| `Chart` | A markdown table of its numbers: a row for each category and a column for each series. |
+| `Progress` | A list of its steps with the status of each, or the share as text. |
+| `Timeline` | A list of its items, oldest first, with the time of each. |
+| `Link` | A link to the page on the dashboard, or to the outside address. |
+| `Image`, `ImageGallery`, `Files` | A link to each image or file. |
+| `EmptyState` | The title and the description. |
+| `TextValue`, `StatusValue` | The words. A value with a link is a link. |
+| `NumberValue` | The number with its unit. |
+| `TimeValue` | The time in UTC. |
+| `SubjectStatus` | The word that the dashboard shows. |
+| `ControlsValue` | Its links. |
+
+A link to a page opens on the dashboard at `urls.endpoint`, with its arguments
+in the route. A link to a subject opens on the page that the app declares for
+the subject's decisions, else on the subject's own page. A path such as the
+`/api/files/…` address of an image also takes the endpoint. An installation with
+no endpoint has no address for the dashboard, so such a link shows only its
+words. A link to an outside `http(s)` address stays a link. Any other address,
+such as a `data:` image, shows only its words.
+
+`Form`, `Action`, and `GateControls` have no text form, because the operator
+acts through them. Their `to_markdown()` raises `NoTextFormError`, which names
+the block. A table that selects rows, a board that takes drops, and a block with
+an action in its controls have no text form either. `review` refuses a context
+that holds one of the three blocks anywhere, before the run parks.
+
 ## Actions and links
 
 An `Action` names an app-local operation:
@@ -1470,6 +1519,7 @@ class SubjectStatus:
     value: Literal["subject_status"] = "subject_status"
     subject: Follows
     working: str = "working"
+    status: dict | None = None
 ```
 
 ```json
@@ -1477,7 +1527,8 @@ class SubjectStatus:
 ```
 
 The author writes `ui.SubjectStatus(target, working="auditing")`. Druks adds
-`status`, the status the board reads, when it serves the page.
+`status`, the status the board reads, when it serves the page or reads the ask of
+a review.
 
 ### TimeValue
 
