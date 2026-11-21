@@ -25,6 +25,7 @@ with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as _settings_file
 os.environ.setdefault("DRUKS_CONFIG", str(_settings_path))
 os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
 
+import druks.agents.models  # noqa: F401
 import druks.browser.models  # noqa: F401
 import druks.durable.models  # noqa: F401
 import druks.files.models  # noqa: F401
@@ -320,7 +321,7 @@ def druks_without_dispatch() -> Iterator[None]:
 
     with (
         mock.patch.object(Workflow, "start", classmethod(_noop)),
-        mock.patch("druks.agents.set_run_phase", _phase_noop),
+        mock.patch("druks.instructions.set_run_phase", _phase_noop),
         mock.patch("druks.durable.reads.get_run_phase", _phase_noop),
         mock.patch("dbos.DBOS.cancel_workflow_async", _cancel),
     ):

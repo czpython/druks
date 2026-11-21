@@ -6,7 +6,7 @@ from pathlib import Path
 import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from druks import agents
+from druks import instructions
 from druks.accounts import jwt as assertion
 from druks.accounts.models import Account
 from druks.api.server import app
@@ -57,11 +57,11 @@ _MANAGER_JWKS = {
 }
 
 
-class ConfigOutput(agents.AgentOutput):
+class ConfigOutput(instructions.InstructionOutput):
     ok: bool
 
 
-CONFIG_PROBE = agents.Agent(id="config_probe", prompt="probe.md", contract=ConfigOutput)
+CONFIG_PROBE = instructions.Instruction(id="config_probe", prompt="probe.md", contract=ConfigOutput)
 
 
 def settings_client(tmp_path: Path) -> TestClient:
@@ -91,16 +91,22 @@ async def connect_service(slug: str, *, identity: dict, secrets: dict) -> VaultS
 
 
 async def install_service(
-    slug: str, *, access_token: str, identity: dict, secrets: dict | None = None
+    slug: str,
+    *,
+    access_token: str,
+    identity: dict,
+    secrets: dict | None = None,
+    scopes: tuple[str, ...] = (),
 ) -> VaultSecret:
-    """Seed the rows a finished install would leave: the service's row and its own grant."""
+    """Seed the rows a finished install would leave: the service's row and its own grant,
+    with the scopes the install granted."""
     row = await connect_service(slug, identity=identity, secrets=secrets or {})
     await VaultSecret.connect(
         db_session(),
         Audience.service(slug),
         account_id=None,
         refresh_token="",
-        scopes=[],
+        scopes=list(scopes),
         secrets={"access_token": access_token},
     )
     return row
@@ -169,7 +175,7 @@ def _no_durable_dispatch(request, monkeypatch):
     # monkeypatch, not mock.patch: when a test patches one of these too, monkeypatch
     # undoes both in reverse order and puts the real attribute back.
     monkeypatch.setattr(Workflow, "start", classmethod(_noop))
-    monkeypatch.setattr("druks.agents.set_run_phase", _phase_noop)
+    monkeypatch.setattr("druks.instructions.set_run_phase", _phase_noop)
     monkeypatch.setattr("druks.durable.reads.get_run_phase", _phase_noop)
     monkeypatch.setattr("druks.durable.reads.get_run_phase_ends_at", _phase_noop)
     monkeypatch.setattr("dbos.DBOS.cancel_workflow_async", _dbos_cancel)

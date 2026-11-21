@@ -11,7 +11,6 @@ import pytest
 from conftest import bind_ambient_session, connect_service
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
-from druks.agents import Bot
 from druks.apps import App, loader
 from druks.apps.registry import bots
 from druks.chat import service
@@ -22,6 +21,7 @@ from druks.chat.enums import MessageState
 from druks.chat.models import Conversation
 from druks.core.apis.twilio import TwilioClient
 from druks.core.services import Twilio
+from druks.instructions import Bot
 from druks.notifications.services import validate_in_app_answer
 from druks.secrets.models import VaultSecret
 from druks.teams.models import Team

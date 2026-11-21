@@ -13,6 +13,8 @@ export interface ConversationSummary {
   lastMessageAt: string
   messageCount: number
   activeMessageId: string | null
+  agentId: string | null
+  agentName: string | null
 }
 
 export interface Message {

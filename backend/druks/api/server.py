@@ -14,11 +14,13 @@ from starlette.routing import Route
 from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
+from druks.agents.routes import router as agents_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.dashboard import router as dashboard_router
 from druks.api.dependencies import commit_before_response
 from druks.api.exceptions import AgentApiError
 from druks.api.runs import router as runs_router
+from druks.api.schedules import router as schedules_router
 from druks.api.subjects import router as subjects_router
 from druks.apps.loader import iter_apps, load, register_apps
 from druks.apps.routes import router as apps_router
@@ -65,7 +67,7 @@ from druks.settings import (
 from druks.skills.routes import router as skills_router
 from druks.teams.routes import router as teams_router
 from druks.ui.exceptions import PageReadError
-from druks.user_settings.routes import agents_router
+from druks.user_settings.routes import instructions_router
 from druks.user_settings.routes import router as settings_router
 from druks.webhooks import router as webhooks_router
 
@@ -327,12 +329,13 @@ app.include_router(notifications_external_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(teams_router)
+app.include_router(agents_router)
 app.include_router(providers_router)
 app.include_router(secrets_router)
 app.include_router(browser_sessions_router)
 app.include_router(agent_browser_router, dependencies=_identity_gate)
 app.include_router(settings_router, dependencies=_identity_gate)
-app.include_router(agents_router, dependencies=_identity_gate)
+app.include_router(instructions_router, dependencies=_identity_gate)
 app.include_router(apps_router, dependencies=_identity_gate)
 app.include_router(service_identities_router, dependencies=_identity_gate)
 app.include_router(oauth_router, dependencies=_identity_gate)
@@ -341,6 +344,7 @@ app.include_router(mcp_router, dependencies=_identity_gate)
 app.include_router(notifications_router, dependencies=_identity_gate)
 app.include_router(events_router, dependencies=_identity_gate)
 app.include_router(runs_router, dependencies=_identity_gate)
+app.include_router(schedules_router, dependencies=_identity_gate)
 app.include_router(dashboard_router, dependencies=_identity_gate)
 app.include_router(subjects_router, dependencies=_identity_gate)
 app.include_router(gateway_router, dependencies=_identity_gate)

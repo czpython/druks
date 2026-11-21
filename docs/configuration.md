@@ -11,7 +11,7 @@ without replacing the process.
 | Plane | Examples | Stored in |
 | --- | --- | --- |
 | Deployment | installation timezone, identity, ingress, Drukbox | `~/druks/druks.toml` |
-| Dashboard | personal timezone, the GitHub connection, harness and tracker credentials, workflow and agent overrides, MCP servers, skills | Postgres |
+| Dashboard | personal timezone, the GitHub connection, harness and tracker credentials, workflow and instruction overrides, MCP servers, skills | Postgres |
 
 The installer creates the deployment `.env` from `druks.toml`. Compose, Druks,
 and Drukbox consume this build artifact. Edit `druks.toml`, then run the
@@ -175,9 +175,9 @@ Generate migrations with every app enabled. With an app disabled,
 ## Personal and installation settings
 
 One Druks installation serves one organization. Separate organizations use
-separate installations. **Settings → Agents** owns the shared harness, model,
+separate installations. **Settings → Instructions** owns the shared harness, model,
 billing, effort, fast mode, and timeout defaults. Every account uses these
-defaults. Shared agent overrides take priority. A declared agent timeout also
+defaults. Shared instruction overrides take priority. A declared instruction timeout also
 takes priority over the installation default.
 
 Effort is one of `low`, `medium`, `high`, `xhigh`, and `max`. Claude and Pi
@@ -186,6 +186,8 @@ take the level as it is. Codex's scale ends at `xhigh`, so it runs `max` as
 
 **Include apps** is off by default. When it is on, a run loads the apps of the
 subscription it runs on in its sandbox: claude.ai connectors or ChatGPT apps.
+A private agent then loads the apps of its owner's subscription. A public agent
+never loads apps.
 See [Harnesses](#harnesses) for what the switch changes in a sandbox.
 
 **Settings → Preferences** edits the timezone, the theme, and where your
@@ -277,7 +279,7 @@ caches, and the sandbox provisioning gate.
 | --- | --- |
 | `urls.endpoint` | Browser-visible dashboard URL and MCP OAuth callback base. It is also the `/mcp` base of a box when `urls.mcp_url` and `urls.webhook_host` are empty. WebSocket upgrades must come from its host. When it is empty, they must come from the request's `Host` |
 | `urls.webhook_host` | Public webhook hostname and the HTTPS host for this installation's `/mcp` endpoint. A box reaches `/mcp` there when `urls.mcp_url` is empty |
-| `urls.mcp_url` | The URL of this installation's `/mcp` endpoint that a box and the calls server dial, for the Druks tools and the agent browser. When it is empty, the default, they use `/mcp` on the webhook address: `urls.webhook_host`, else `urls.endpoint`. Druks does not start when it is set and is not an absolute `http` or `https` URL |
+| `urls.mcp_url` | The URL of this installation's `/mcp` endpoint that a box, the calls server, and Druks' own schedule calls dial, for the Druks tools and the agent browser. When it is empty, the default, they use `/mcp` on the webhook address: `urls.webhook_host`, else `urls.endpoint`. Druks does not start when it is set and is not an absolute `http` or `https` URL |
 | `identity.mode` | `none` (default, no authentication, single operator), `header` (edge-asserted identity), or `jwt` (validated edge-signed assertion) |
 | `identity.header` | The trusted identity header. The shipped Caddy edge also uses it. Header and JWT modes have no default and require it |
 | `identity.jwks_url` | `jwt` mode: where the edge publishes its signing keys |
@@ -300,7 +302,8 @@ Set `urls.mcp_url` when a box reaches Druks' `/mcp` at an address that the
 providers do not reach, such as a private network. Slack, GitHub, Twilio, and
 WhatsApp keep the webhook address. The key that a box holds for `/mcp` goes
 only to the host of `urls.mcp_url`. The
-[calls server](deployment.md#the-calls-server) must also reach this address.
+[calls server](deployment.md#the-calls-server), and Druks itself when it makes a
+schedule's tool call, must also reach this address.
 The listener at this address must serve only `/mcp`, like the webhook
 listener. It must not be the `:8000` dashboard listener or the web port. A box
 that reaches either one can send the identity header and act as an operator.
@@ -759,11 +762,11 @@ install it from Druks.
    Slack's first check ran before the card held the signing secret, so Druks
    refused it.
 
-The manifest asks for the bot scopes `chat:write`, `channels:history`,
-`channels:read`, `groups:history`, `groups:read`, `im:history`, `mpim:history`,
-`users:read`, `files:read`, and `reactions:write`. It subscribes the bot to direct
-messages, to the rooms it is invited to, and to joins in those rooms. It leaves
-token rotation off and names these URLs:
+The manifest asks for the bot scopes `chat:write`, `chat:write.customize`,
+`channels:history`, `channels:read`, `groups:history`, `groups:read`,
+`im:history`, `mpim:history`, `users:read`, `files:read`, and `reactions:write`.
+It subscribes the bot to direct messages, to the rooms it is invited to, and to
+joins in those rooms. It leaves token rotation off and names these URLs:
 
 Events URL:
 `https://<webhook-host>/_external/slack/events/`
@@ -779,10 +782,13 @@ event older than five minutes. With rotation off, the bot token from the install
 and each person's Slack token live until someone revokes them. A person connects
 their own Slack account through the same app: see [Chat](chat.md#slack).
 
-An app created from an earlier manifest needs `reactions:write` and the
-Interactivity URL. Add the scope under **OAuth & Permissions** and reinstall the
-app. Under **Interactivity & Shortcuts**, turn on Interactivity and set the
-Request URL to the Interactivity URL.
+An app created from an earlier manifest needs `reactions:write`,
+`chat:write.customize`, and the Interactivity URL. Add the scopes under
+**OAuth & Permissions**, then select **Install** on the Slack card again. Druks
+reads the scopes from that install. Until then, an agent's replies show the
+app's name, not the agent's name and picture. Under
+**Interactivity & Shortcuts**, turn on Interactivity and set the Request URL to
+the Interactivity URL.
 
 ## Speech to text
 
@@ -831,7 +837,7 @@ subscription token on a schedule. A sandbox holds a placeholder for the
 subscription token and never the token. Drukbox fetches the token from the
 Druks issuer through the sandbox's identity, and the secrets proxy swaps the
 placeholder on each request to the entry's host. See
-[sandbox identities and the issuer](concepts.md#agents-harnesses-workspaces-and-sandboxes).
+[sandbox identities and the issuer](concepts.md#instructions-harnesses-workspaces-and-sandboxes).
 Druks does not copy a host login. This is a capability connection for the
 requesting account. In a fresh `none`-mode install, the first completed
 subscription connection also creates the operator account. See
@@ -953,7 +959,7 @@ the `mcpServers` block from `.claude.json` before the copy. MCP credentials
 are sandbox entries. Provider credentials do not belong in this root. OpenCode
 and Pi do not read it.
 The default harness, model, billing, effort, and timeout live in
-**Settings → Agents**. Each agent can override any of them on its app's page.
+**Settings → Instructions**. Each instruction can override any of them on its app's page.
 **Unattended runs use** names the default account. Shared execution settings
 select subscription or API key billing. Subscription billing uses the run
 account's subscription. API key billing uses the installation key. A call refuses
@@ -1198,11 +1204,19 @@ repository needs the GitHub App installed on it.
 `DRUKS_SKILLS_DIR` selects the shared writable directory. Its default is
 `<DRUKS_DATA_DIR>/skills`. A call receives the enabled skills that it requests.
 If it requests none, it receives each enabled skill. A Software Factory build
-requests the recommended set from the repository profile.
+requests the recommended set from the repository profile. A call or a chat
+turn that runs as an agent, such as a [task run](chat.md#tasks), receives only
+the enabled skills picked on the agent, and none when the agent picked none.
 
 Druks uploads no other
 installed skill. The capability manifest records the delivered
-set for each agent.
+set for each agent call.
+
+Before each turn of a conversation with an agent, Druks copies those skills
+into the agent's sandbox. An agent on OpenCode gets none. Druks
+removes from the sandbox each skill it copied earlier that the agent no longer
+gets, including a skill removed from Druks. A chat without an agent gets no
+skills.
 
 ## Credential custody and secrets at rest
 

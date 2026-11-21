@@ -11,21 +11,21 @@ Apps do not implement transport or file routes.
 
 ## Receive a file from an agent
 
-Annotate the file in the agent output contract. Every nested object must also
-inherit `AgentOutput`. The harness needs a strict schema at every object node.
+Annotate the file in the instruction output contract. Every nested object must also
+inherit `InstructionOutput`. The harness needs a strict schema at every object node.
 
 ```python
-from druks.agents import AgentOutput
+from druks.instructions import InstructionOutput
 from druks.files import File
 
 
-class SurveyShot(AgentOutput):
+class SurveyShot(InstructionOutput):
     screen: str
     viewport: str
     image: File
 
 
-class SurveyOutput(AgentOutput):
+class SurveyOutput(InstructionOutput):
     findings: list[str]
     shots: list[SurveyShot]
 ```

@@ -9,10 +9,14 @@ from uuid import uuid4
 
 import asyncssh
 import pytest
+from conftest import connect_anthropic_subscription
+from druks.accounts.context import current_conversation_id
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.agents.models import Agent
 from druks.apps.registry import channels, services
 from druks.chat import service, sockets
+from druks.chat.app import Chat
 from druks.chat.bots import service as bot_service
 from druks.chat.bridge import Bridge
 from druks.chat.constants import (
@@ -32,10 +36,12 @@ from druks.chat.exceptions import (
     ChatSandboxGone,
 )
 from druks.chat.models import Conversation, Message
+from druks.chat.workflows import RunInstruction
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import get_session, session_scope
 from druks.durable.constants import NOTIFICATIONS_QUEUE, TASK_QUEUE
 from druks.durable.dbos_state import workflow_status
+from druks.exceptions import PermissionDenied
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
@@ -53,23 +59,35 @@ from druks.sandbox.host import Host
 from druks.sandbox.models import SandboxIdentity, SecretRef
 from druks.secrets.datastructures import Audience
 from druks.secrets.models import VaultSecret
-from druks.settings import Urls
+from druks.settings import Urls, get_settings
+from druks.skills.datastructures import InstalledSkill
+from druks.skills.models import Skill, SkillCollection
 from druks.teams.models import Team
 from druks.testing import (
     asgi_client,
     configure_app_for_test,
     make_settings,
+    run_workflow,
     seed_call,
     seed_run,
 )
-from druks.user_settings.models import SettingsOverride
-from druks.workflows import Subject
+from druks.user_settings.models import InstallationSettings, SettingsOverride
+from druks.workflows import _CONVERSATION_INPUT_KEY, FatalError, Subject
 from druks_field_notes.app import FieldNotes
 from druks_field_notes.workflows import Summarize
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic_core import to_json
 from sqlalchemy import delete, select
 
+AGENT = {
+    "name": "Security engineer",
+    "description": "Reviews changes for security problems.",
+    "instructions": "Answer as a security engineer.",
+    "skills": [],
+    "harness": "claude",
+    "model": "anthropic/claude-opus-4-7",
+    "is_private": True,
+}
 CODEX_KEY_LOGIN = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
 OPENCODE_BOT_AGENT = (
     "---\nmode: primary\npermission: "
@@ -303,6 +321,7 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     first_host, _identity = await service.get_sandbox(
         druks_db,
         conversation.account_id,
+        scoped_to="chat",
         config=config,
         allowed_tools=Toolkit.ALL,
         secret_refs=[],
@@ -310,6 +329,7 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     second_host, _identity = await service.get_sandbox(
         druks_db,
         second.account_id,
+        scoped_to="chat",
         config=config,
         allowed_tools=Toolkit.ALL,
         secret_refs=[],
@@ -323,6 +343,7 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     moved_host, _identity = await service.get_sandbox(
         druks_db,
         second.account_id,
+        scoped_to="chat",
         config=moved,
         allowed_tools=Toolkit.ALL,
         secret_refs=[],
@@ -331,6 +352,7 @@ async def test_conversations_share_the_account_sandbox_until_its_secrets_change(
     rekeyed_host, _identity = await service.get_sandbox(
         druks_db,
         second.account_id,
+        scoped_to="chat",
         config=SimpleNamespace(secret_refs=moved.secret_refs, secrets={}, secrets_hash="key-two"),
         allowed_tools=Toolkit.ALL,
         secret_refs=[],
@@ -427,7 +449,9 @@ async def test_missing_sandbox_interrupts_delivered_turn_without_provisioning(
     await service.deliver_pending(druks_db, conversation)
 
     assert message.state == "interrupted"
-    get_running_sandbox.assert_awaited_once_with(druks_db, conversation.account_id)
+    get_running_sandbox.assert_awaited_once_with(
+        druks_db, conversation.account_id, scoped_to="chat"
+    )
 
 
 @pytest.mark.usefixtures("tmp_data_dir")
@@ -1586,7 +1610,7 @@ async def test_stop_during_startup_keeps_the_sandbox_and_sends_only_the_next_mes
     sandbox_requests = 0
     prompts = []
 
-    async def get_sandbox(session, account_id, *, config, allowed_tools, secret_refs):
+    async def get_sandbox(session, account_id, *, scoped_to, config, allowed_tools, secret_refs):
         nonlocal sandbox_requests
         sandbox_requests += 1
         await session.commit()
@@ -1872,3 +1896,419 @@ async def test_the_chat_prompt_names_only_the_apps_the_member_can_use(druks_db):
 
     assert FieldNotes.description not in prompt
     assert SoftwareFactory.description in prompt
+
+
+async def test_each_agent_turn_answers_by_the_agents_instructions_at_that_turn(
+    druks_db, monkeypatch
+):
+    subscription = await connect_anthropic_subscription("owner@example.com")
+    owner = await Account.get(druks_db, id=subscription.account_id)
+    agent = await Agent.create(druks_db, owner=owner, **AGENT)
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Review this", agent_id=agent.id
+    )
+    await druks_db.commit()
+    prompts = []
+
+    async def send_turn(session, _conversation, message, *, prompt, **values):
+        prompts.append(prompt)
+        message.state = MessageState.REPLIED
+        await session.commit()
+        if len(prompts) == 1:
+            # The owner edits the agent while the next message waits in this delivery.
+            await agent.replace(
+                druks_db,
+                editor=owner,
+                channel_id=None,
+                picture_url=None,
+                **{**AGENT, "owner_id": owner.id, "instructions": "Answer as a release manager."},
+            )
+            await conversation.create_message(druks_db, "And now?")
+            await druks_db.commit()
+
+    host = SimpleNamespace(aclose=AsyncMock())
+    monkeypatch.setattr(service, "get_sandbox", AsyncMock(return_value=(host, None)))
+    monkeypatch.setattr(service, "send_turn", send_turn)
+    # The delivery reads the conversation and its agent in a session of its own.
+    monkeypatch.setattr(service, "step_session", session_scope)
+
+    await service.deliver_turns(conversation.id)
+
+    first, second = prompts
+    assert "Answer as a security engineer." in first
+    assert "Answer as a release manager." in second
+    assert "Answer as a security engineer." not in second
+
+
+async def test_an_agent_turn_runs_on_the_agents_harness_in_the_agents_box(druks_db, monkeypatch):
+    subscription = await connect_anthropic_subscription("owner@example.com")
+    owner = await Account.get(druks_db, id=subscription.account_id)
+    # The person's Chat runs on a harness that cannot answer a chat at all.
+    await SettingsOverride.set_agent_harness(druks_db, "chat.bot", "pi")
+    await SettingsOverride.set_agent_billing(druks_db, "chat.bot", "api_key")
+    agent = await Agent.create(druks_db, owner=owner, **AGENT)
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Review this", agent_id=agent.id
+    )
+    await druks_db.refresh(conversation, ["account", "agent"])
+    get_sandbox = AsyncMock(side_effect=ChatSandboxGone("stop at the box"))
+    monkeypatch.setattr(service, "get_sandbox", get_sandbox)
+
+    with pytest.raises(ChatSandboxGone):
+        await service.deliver_pending(druks_db, conversation)
+
+    sandbox = get_sandbox.await_args.kwargs
+    assert sandbox["scoped_to"] == f"agent:{agent.id}"
+    assert sandbox["config"].harness_class is ClaudeHarness
+    assert sandbox["config"].model == "anthropic/claude-opus-4-7"
+    assert sandbox["config"].subscription.id == subscription.id
+
+
+async def start_turn(session, conversation, host, monkeypatch):
+    """Send the conversation's turn until the bridge starts the session, and return the
+    start request."""
+    starts = []
+
+    async def request(self, method, **values):
+        if method == "start":
+            starts.append(values)
+            raise ChatBridgeError("stop after the start")
+        return {"status": "missing", "sessionId": ""}
+
+    monkeypatch.setattr(Bridge, "request", request)
+    message = await conversation.get_unanswered_message(session)
+    config = await service.get_config(session, "chat.bot", conversation.account_id)
+    with pytest.raises(ChatBridgeError):
+        await service.send_turn(
+            session,
+            conversation,
+            message,
+            bridge=Bridge(host),
+            identity=None,
+            config=config,
+            prompt="Be kind.",
+            mcp_servers=(),
+        )
+    [start] = starts
+    return start
+
+
+async def test_an_agent_box_holds_only_the_agents_enabled_skills(
+    druks_db, conversation, sandbox, monkeypatch
+):
+    collection = await SkillCollection.create(
+        druks_db,
+        source="https://github.com/o/r",
+        name="o/r",
+        skills=[
+            InstalledSkill(name=name, description="", path=f"/p/{name}", content_hash=name)
+            for name in ("alpha", "beta")
+        ],
+    )
+    agent = await Agent.create(
+        druks_db, owner=conversation.account, **{**AGENT, "skills": ["alpha", "beta"]}
+    )
+    (await Skill.get(druks_db, "beta")).enabled = False
+    agent_conversation = await Conversation.create(
+        druks_db, account_id=conversation.account_id, body="Review this", agent_id=agent.id
+    )
+    await druks_db.refresh(agent_conversation, ["account", "agent"])
+    folder = "/home/druks/.claude/skills"
+    files = {}
+    removed = []
+
+    async def exec(command, **values):
+        if command[0] == "cat":
+            return SimpleNamespace(returncode=0, stdout=files.get(command[1], ""))
+        if command[0] == "rm":
+            removed.extend(command[2:])
+        if command[0] == "sh":
+            files[command[3]] = "".join(f"{name}\n" for name in command[4:])
+        return SimpleNamespace(returncode=0, stdout="")
+
+    host, _identity = sandbox
+    host.exec = exec
+    host.upload_dir = AsyncMock()
+
+    first = await start_turn(druks_db, agent_conversation, host, monkeypatch)
+
+    host.upload_dir.assert_awaited_once_with(
+        local=get_settings().skills_dir, remote=folder, members=["alpha"]
+    )
+    assert removed == []
+
+    # Removing the collection deletes its rows, and the box still holds alpha.
+    await collection.delete()
+    host.upload_dir.reset_mock()
+    second = await start_turn(druks_db, agent_conversation, host, monkeypatch)
+
+    host.upload_dir.assert_not_awaited()
+    assert removed == [f"{folder}/alpha"]
+    # The bridge reopens the session, so the agent stops seeing the removed skill.
+    assert first["setup"] != second["setup"]
+
+
+async def test_a_public_agent_turn_runs_on_the_unattended_subscription_in_the_askers_box(
+    druks_db, monkeypatch
+):
+    unattended = await connect_anthropic_subscription("admin@example.com")
+    await (await InstallationSettings.get_or_create(druks_db)).update(include_apps=True)
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    agent = await Agent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    get_sandbox = AsyncMock(side_effect=ChatSandboxGone("stop at the box"))
+    monkeypatch.setattr(service, "get_sandbox", get_sandbox)
+    askers = []
+    for email in ["ana@example.com", "ben@example.com"]:
+        # The asker's own subscription must not pay for the turn.
+        asker = await Account.get(
+            druks_db, id=(await connect_anthropic_subscription(email)).account_id
+        )
+        askers.append(asker.id)
+        conversation = await Conversation.create(
+            druks_db, account_id=asker.id, body="Review this", agent_id=agent.id
+        )
+        await druks_db.refresh(conversation, ["account", "agent"])
+        with pytest.raises(ChatSandboxGone):
+            await service.deliver_pending(druks_db, conversation)
+
+    turns = [(call.args[1], call.kwargs) for call in get_sandbox.await_args_list]
+    assert [account_id for account_id, _ in turns] == askers
+    for _, sandbox in turns:
+        assert sandbox["scoped_to"] == f"agent:{agent.id}"
+        assert sandbox["config"].subscription.id == unattended.id
+        assert not sandbox["config"].include_apps
+
+
+async def test_a_public_agent_turn_runs_on_the_install_api_key(druks_db, monkeypatch):
+    await connect_anthropic_subscription("admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    key = await VaultSecret.paste(
+        druks_db, Audience.provider("anthropic"), "sk-shared", pasted_by=owner
+    )
+    agent = await Agent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Review this", agent_id=agent.id
+    )
+    await druks_db.refresh(conversation, ["account", "agent"])
+    get_sandbox = AsyncMock(side_effect=ChatSandboxGone("stop at the box"))
+    monkeypatch.setattr(service, "get_sandbox", get_sandbox)
+
+    with pytest.raises(ChatSandboxGone):
+        await service.deliver_pending(druks_db, conversation)
+
+    config = get_sandbox.await_args.kwargs["config"]
+    assert config.api_key.id == key.id
+    assert config.subscription is None
+
+
+async def test_the_agent_box_and_the_chat_box_never_replace_each_other(
+    druks_db, conversation, monkeypatch
+):
+    hosts = {}
+
+    async def provision(**values):
+        host = SimpleNamespace(id=f"sandbox-{len(hosts) + 1}", aclose=AsyncMock())
+        hosts[host.id] = host
+        await values["identity"].bind(host.id)
+        return host
+
+    @asynccontextmanager
+    async def attach(*, host_id):
+        yield hosts[host_id]
+
+    release = AsyncMock()
+    monkeypatch.setattr(
+        service,
+        "sandbox_client",
+        SimpleNamespace(provision=provision, attach=attach, release=release),
+    )
+    monkeypatch.setattr(service, "get_template_id", AsyncMock(return_value="chat-template"))
+    monkeypatch.setattr(Bridge, "start", AsyncMock())
+    hosts_by_scope = []
+    for scoped_to, secrets_hash in [
+        ("chat", "chat-key"),
+        ("agent:one", "agent-key"),
+        ("chat", "chat-key"),
+    ]:
+        host, _identity = await service.get_sandbox(
+            druks_db,
+            conversation.account_id,
+            scoped_to=scoped_to,
+            config=SimpleNamespace(secret_refs=[], secrets={}, secrets_hash=secrets_hash),
+            allowed_tools=Toolkit.ALL,
+            secret_refs=[],
+        )
+        hosts_by_scope.append(host.id)
+
+    assert hosts_by_scope == ["sandbox-1", "sandbox-2", "sandbox-1"]
+    release.assert_not_awaited()
+
+
+async def test_anyone_talks_to_a_public_agent_and_only_its_owner_to_a_private_one(
+    druks_db, tmp_path
+):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    await Account.get_or_create(druks_db, "other@example.com")
+    private = await Agent.create(druks_db, owner=owner, **AGENT)
+    public = await Agent.create(
+        druks_db, owner=owner, **{**AGENT, "name": "Reviewer", "is_private": False}
+    )
+    await druks_db.commit()
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    async with asgi_client(api) as client:
+        started = await client.post(
+            "/api/chat/conversations",
+            json={"body": "Review this", "agentId": private.id},
+            headers={"X-User": "owner@example.com"},
+        )
+        stranger = await client.post(
+            "/api/chat/conversations",
+            json={"body": "Review this", "agentId": private.id},
+            headers={"X-User": "other@example.com"},
+        )
+        public_started = await client.post(
+            "/api/chat/conversations",
+            json={"body": "Review this", "agentId": public.id},
+            headers={"X-User": "other@example.com"},
+        )
+
+    assert started.status_code == 201
+    assert (await druks_db.get(Conversation, started.json()["id"])).agent_id == private.id
+    assert stranger.status_code == 404
+    assert public_started.status_code == 201
+    assert (await druks_db.get(Conversation, public_started.json()["id"])).agent_id == public.id
+
+
+async def test_the_conversation_list_names_the_agent_that_answers(druks_db, tmp_path):
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    agent = await Agent.create(druks_db, owner=owner, **AGENT)
+    await druks_db.commit()
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    headers = {"X-User": "owner@example.com"}
+    async with asgi_client(api) as client:
+        started = await client.post(
+            "/api/chat/conversations",
+            json={"body": "Review this", "agentId": agent.id},
+            headers=headers,
+        )
+        await client.post("/api/chat/conversations", json={"body": "Hello"}, headers=headers)
+        listed = await client.get("/api/chat/conversations", headers=headers)
+
+    assert (started.json()["agentId"], started.json()["agentName"]) == (agent.id, agent.name)
+    plain, with_agent = sorted(listed.json(), key=lambda entry: bool(entry["agentId"]))
+    assert (with_agent["agentId"], with_agent["agentName"]) == (agent.id, agent.name)
+    assert (plain["agentId"], plain["agentName"]) == (None, None)
+
+
+async def test_an_agent_starts_a_task_run_only_from_a_chat(
+    druks_db, conversation, tmp_path, monkeypatch
+):
+    started_from = []
+
+    async def start(*, subject, instruction):
+        started_from.append((subject, instruction, current_conversation_id.get()))
+        return "run-1"
+
+    monkeypatch.setattr(RunInstruction, "start", start)
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    owner = {"X-User": "owner@example.com"}
+    task = {"instruction": "Get the price of the blue kettle."}
+    async with asgi_client(api) as client:
+        nowhere = await client.post("/api/chat/instructions", json=task, headers=owner)
+        started = await client.post(
+            "/api/chat/instructions",
+            json=task,
+            headers={**owner, CONVERSATION_HEADER: conversation.id},
+        )
+
+    assert (nowhere.status_code, started.status_code) == (422, 202)
+    assert started.json() == "run-1"
+    assert started_from == [(None, "Get the price of the blue kettle.", conversation.id)]
+
+
+async def test_a_task_run_refuses_once_a_public_agent_turns_private(druks_db, monkeypatch):
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    other = await Account.get_or_create(druks_db, "other@example.com")
+    agent = await Agent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    conversation = await Conversation.create(
+        druks_db, account_id=other.id, body="Get the price", agent_id=agent.id
+    )
+    await agent.replace(
+        druks_db,
+        editor=owner,
+        owner_id=owner.id,
+        channel_id=None,
+        picture_url=None,
+        **{**AGENT, "is_private": True},
+    )
+    await druks_db.commit()
+    run_instruction = AsyncMock()
+    monkeypatch.setattr(Chat, "run_instruction", run_instruction)
+
+    with pytest.raises(PermissionDenied, match="Only the agent's owner"):
+        await run_workflow(
+            RunInstruction,
+            account_id=other.id,
+            instruction="Get the price of the blue kettle.",
+            **{_CONVERSATION_INPUT_KEY: conversation.id},
+        )
+
+    run_instruction.assert_not_awaited()
+
+
+async def test_a_task_run_fails_once_its_chat_is_deleted_with_its_agent(druks_db):
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    agent = await Agent.create(druks_db, owner=owner, **AGENT)
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Get the price", agent_id=agent.id
+    )
+    await agent.delete()
+    await druks_db.commit()
+
+    with pytest.raises(FatalError, match="deleted with its agent"):
+        await run_workflow(
+            RunInstruction,
+            account_id=owner.id,
+            instruction="Get the price of the blue kettle.",
+            **{_CONVERSATION_INPUT_KEY: conversation.id},
+        )
+
+
+async def test_a_task_run_does_the_task_as_the_chats_agent(druks_db, monkeypatch):
+    subscription = await connect_anthropic_subscription("owner@example.com")
+    owner = await Account.get(druks_db, id=subscription.account_id)
+    agent = await Agent.create(druks_db, owner=owner, **AGENT)
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Get the price", agent_id=agent.id
+    )
+    await druks_db.commit()
+    run_instruction = AsyncMock(return_value="The blue kettle costs 40 euros.")
+    monkeypatch.setattr(Chat, "run_instruction", run_instruction)
+
+    answer = await run_workflow(
+        RunInstruction,
+        account_id=owner.id,
+        instruction="Get the price of the blue kettle.",
+        **{_CONVERSATION_INPUT_KEY: conversation.id},
+    )
+
+    assert answer == {
+        "task": "Get the price of the blue kettle.",
+        "answer": "The blue kettle costs 40 euros.",
+    }
+    kwargs = run_instruction.await_args.kwargs
+    assert (kwargs["agent"].id, kwargs["agent_instructions"], kwargs["instruction"]) == (
+        agent.id,
+        "Answer as a security engineer.",
+        "Get the price of the blue kettle.",
+    )

@@ -246,9 +246,9 @@ class Urls(BaseModel):
     endpoint: str = ""
     # The public webhook hostname Caddy serves.
     webhook_host: str = ""
-    # The URL of Druks' own ``/mcp`` that a box and the calls server dial, such as
-    # an address on a private network that the providers do not reach. Empty:
-    # ``/mcp`` on ``webhook_base``.
+    # The URL of Druks' own ``/mcp`` that a box, the calls server, and Druks' schedule
+    # calls dial, such as an address on a private network that the providers do not
+    # reach. Empty: ``/mcp`` on ``webhook_base``.
     mcp_url: str = ""
 
     @model_validator(mode="after")

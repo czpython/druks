@@ -144,8 +144,8 @@ provisioning a sandbox.
 ### Model has no harness
 
 A model id is `provider/model`, such as `anthropic/claude-opus-4-7`. A bare id
-names no harness. Clear a stale per-agent override in Settings or pick a model
-from the picker.
+names no harness. Clear a stale per-instruction override on the app's settings
+page or pick a model from the picker.
 Druks does not silently route an unknown model to another CLI.
 
 ### Drukbox is unreachable

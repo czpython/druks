@@ -4,12 +4,12 @@ from unittest.mock import AsyncMock
 import pytest
 from dbos import DBOS
 from druks.accounts.models import Account
-from druks.agents import Agent, AgentOutput
 from druks.durable.models import Run
 from druks.events.models import Event
 from druks.events.routes import list_feed
 from druks.harnesses.codex import CodexHarness
 from druks.harnesses.exceptions import HarnessSpendLimitError, Retry
+from druks.instructions import Instruction, InstructionOutput
 from druks.sandbox.datastructures import HarnessRunResult
 from druks.testing import seed_run
 from druks.usage.models import UsageScrape
@@ -22,7 +22,7 @@ SPEND_CAP_MESSAGE = (
     "You hit your spend cap set by the owner of your workspace. "
     "Ask an owner to increase your spend cap to continue."
 )
-FAILURE_PROBE = Agent(id="activity_failure_probe", contract=AgentOutput)
+FAILURE_PROBE = Instruction(id="activity_failure_probe", contract=InstructionOutput)
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
@@ -75,7 +75,7 @@ async def test_spend_limit_records_one_terminal_attempt_without_quota_wait(
             HarnessRunResult(returncode=1, stdout=b"", stderr=SPEND_CAP_MESSAGE.encode())
         )
 
-    monkeypatch.setattr(Agent, "_run", run_agent)
+    monkeypatch.setattr(Instruction, "_run", run_agent)
     token = current_workflow.set(workflow)
     try:
         with pytest.raises(HarnessSpendLimitError):

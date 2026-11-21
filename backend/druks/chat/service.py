@@ -9,6 +9,7 @@ from contextlib import suppress
 from datetime import datetime, timedelta
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,7 @@ from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
+from druks.agents.constants import PRIVATE_AGENT_MESSAGE
 from druks.apps.loader import get_app
 from druks.apps.registry import services
 from druks.durable.engine import step_session
@@ -78,6 +80,7 @@ from .constants import (
 )
 from .enums import MessageRole, MessageState
 from .exceptions import (
+    ChatAgentRefusedError,
     ChatBridgeError,
     ChatHarnessError,
     ChatHarnessNotConnectedError,
@@ -86,6 +89,9 @@ from .exceptions import (
 )
 from .models import Conversation, Message
 from .services import SpeechToText
+
+if TYPE_CHECKING:
+    from druks.instructions import Bot
 
 logger = logging.getLogger(__name__)
 
@@ -129,18 +135,10 @@ async def get_agent(
     """The conversation's agent: its Bot's id, its system prompt, and the tools its key
     allows. ``sign_ins`` are the facts of ``list_sign_ins``, for an operator."""
     account_type = conversation.account.kind
-    # A web conversation belongs to Chat.
-    app = "chat"
-    if conversation.connection:
-        app = conversation.connection.identity.get("app", app)
-    bot = get_app(app).bot
-    template, tools = bot.prompt, Toolkit.ALL
-    if account_type == AccountKind.BOT:
-        tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
+    bot = _get_bot(conversation)
+    template = bot.prompt
     if account_type == AccountKind.BOT_ADMIN:
         template = ADMIN_PROMPT
-        admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
-        tools = (*admin_tools, *ADMIN_TOOLS)
     is_shared_thread = bool(conversation.thread_id) and conversation.channel.has_readable_threads
     context = {
         "source": conversation.source,
@@ -157,9 +155,34 @@ async def get_agent(
         context.update(await conversation.channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
     if is_shared_thread and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN):
-        tools = (*tools, *THREAD_TOOLS)
         prompt = f"{prompt}\n\n{THREAD_PROMPT}"
-    return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
+    if conversation.agent:
+        prompt = f"{prompt}\n\n{conversation.agent.instructions}"
+    return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", get_agent_tools(conversation)
+
+
+def get_agent_tools(conversation: Conversation) -> AllowedTools:
+    """The tools that the key of the conversation's agent allows."""
+    account_type = conversation.account.kind
+    bot = _get_bot(conversation)
+    tools = Toolkit.ALL
+    if account_type == AccountKind.BOT:
+        tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
+    if account_type == AccountKind.BOT_ADMIN:
+        admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
+        tools = (*admin_tools, *ADMIN_TOOLS)
+    is_shared_thread = bool(conversation.thread_id) and conversation.channel.has_readable_threads
+    if is_shared_thread and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN):
+        tools = (*tools, *THREAD_TOOLS)
+    return tools
+
+
+def _get_bot(conversation: Conversation) -> "Bot":
+    # A web conversation belongs to Chat.
+    app = "chat"
+    if conversation.connection:
+        app = conversation.connection.identity.get("app", app)
+    return get_app(app).bot
 
 
 async def list_sign_ins(session: AsyncSession, account_id: str) -> list[dict]:
@@ -194,12 +217,13 @@ async def get_sandbox(
     session: AsyncSession,
     account_id: str,
     *,
+    scoped_to: str,
     config: AgentConfig,
     allowed_tools: AllowedTools,
     secret_refs: list[SecretRef],
 ) -> tuple[Host, SandboxIdentity]:
-    """The account's sandbox for a new turn: a live sandbox that holds the Chat
-    agent's current secrets, or a new one."""
+    """The account's sandbox in this scope for a new turn: a live sandbox that holds
+    the agent's current secrets, or a new one."""
     server = get_druks_mcp_server(allowed_tools=())
     token = await get_druks_account_token(session, account_id, allowed_tools, name=CHAT_KEY_NAME)
     refs = [
@@ -217,16 +241,17 @@ async def get_sandbox(
             session,
             account_id=account_id,
             run_id=None,
-            scoped_to="chat",
+            scoped_to=scoped_to,
             secret_refs=refs,
             secrets_hash=config.secrets_hash,
         )
         if identity:
             with suppress(ChatSandboxGone):
                 return await attach_sandbox(session, identity), identity
-        # One sandbox per account: a sandbox with other secrets gives way to the new one.
+        # One sandbox per account and scope: a sandbox with other secrets gives way to
+        # the new one.
         if previous := await SandboxIdentity.lookup(
-            session, account_id=account_id, run_id=None, scoped_to="chat"
+            session, account_id=account_id, run_id=None, scoped_to=scoped_to
         ):
             await sandbox_client.release(host_id=previous.host_id)
         template = await get_template_id(Bridge.sandbox)
@@ -234,7 +259,7 @@ async def get_sandbox(
             session,
             account_id=account_id,
             run_id=None,
-            scoped_to="chat",
+            scoped_to=scoped_to,
             secret_refs=refs,
             secrets_hash=config.secrets_hash,
         )
@@ -248,10 +273,11 @@ async def get_sandbox(
         return host, identity
 
 
-async def get_running_sandbox(session: AsyncSession, account_id: str) -> Host:
-    """The account's live sandbox, whatever its secrets: the sandbox a sent turn runs in."""
+async def get_running_sandbox(session: AsyncSession, account_id: str, *, scoped_to: str) -> Host:
+    """The account's live sandbox in this scope, whatever its secrets: the sandbox a sent
+    turn runs in."""
     identity = await SandboxIdentity.lookup(
-        session, account_id=account_id, run_id=None, scoped_to="chat"
+        session, account_id=account_id, run_id=None, scoped_to=scoped_to
     )
     if identity:
         return await attach_sandbox(session, identity)
@@ -297,6 +323,8 @@ async def deliver(conversation_id: str) -> None:
                 deliver_turns,
                 conversation_id,
             )
+        except ChatAgentRefusedError as error:
+            await record_failed(conversation_id, str(error))
         except ChatHarnessNotConnectedError as error:
             error_message = str(error)
             if endpoint := get_settings().urls.endpoint.rstrip("/"):
@@ -407,9 +435,18 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                             )
                             connections.append(Connection(service, row))
                 sign_ins = await list_sign_ins(session, conversation.account_id)
+            if conversation.agent:
+                # One delivery sends several turns, and each turn reads the agent again.
+                await session.refresh(conversation.agent)
             bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
+            # The agent can change owner or turn private after the conversation began.
+            if conversation.agent and not conversation.account.can_talk_to(conversation.agent):
+                raise ChatAgentRefusedError(f"The agent cannot answer: {PRIVATE_AGENT_MESSAGE}")
             try:
-                config = await get_config(session, bot_id, conversation.account_id)
+                if conversation.agent:
+                    config = await conversation.agent.get_config(session)
+                else:
+                    config = await get_config(session, bot_id, conversation.account_id)
             except AgentConfigError as error:
                 raise ChatHarnessError(f"The agent cannot run: {error}") from error
             except HarnessNotConnectedError as error:
@@ -425,6 +462,7 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
             host, identity = await get_sandbox(
                 session,
                 conversation.account_id,
+                scoped_to=conversation.sandbox_scope,
                 config=config,
                 allowed_tools=tools,
                 secret_refs=secret_refs,
@@ -459,7 +497,9 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                 await host.aclose()
             continue
         try:
-            host = await get_running_sandbox(session, conversation.account_id)
+            host = await get_running_sandbox(
+                session, conversation.account_id, scoped_to=conversation.sandbox_scope
+            )
         except ChatSandboxGone:
             await conversation.end_turn(session, MessageState.INTERRUPTED)
             await session.commit()
@@ -498,6 +538,22 @@ async def send_turn(
             local=get_file_storage().path(conversation.session_file.id),
             remote=archive_path,
         )
+    skills: list[str] = []
+    if conversation.agent and config.harness_class.skills_folder:
+        skills = await conversation.agent.list_enabled_skills(session)
+        folder = f"{sandbox_home}/{config.harness_class.skills_folder}"
+        # The box keeps the names Druks put in it. A skill removed from Druks has no row
+        # left, so only this record says it must leave the box. Nothing else in the
+        # folder is touched.
+        record = f"{folder}.delivered"
+        listed = (await host.exec(["cat", record])).stdout.splitlines()
+        delivered = {name for name in listed if name}
+        if dropped := delivered - set(skills):
+            await host.exec(["rm", "-rf", *(f"{folder}/{name}" for name in sorted(dropped))])
+        if skills:
+            await host.upload_dir(local=get_settings().skills_dir, remote=folder, members=skills)
+        if delivered != set(skills):
+            await host.exec(["sh", "-c", 'printf "%s\\n" "$@" > "$0"', record, *skills])
     server = get_druks_mcp_server(allowed_tools=())
     account_type = conversation.account.kind
     timeout = 0 if account_type == AccountKind.OPERATOR else config.timeout
@@ -509,8 +565,11 @@ async def send_turn(
         }
         for mcp_server in mcp_servers
     ]
-    # The bridge reopens a live session when its instructions or MCP servers change.
-    setup = hashlib.sha256(to_json([prompt, server.url, session_servers])).hexdigest()
+    # The bridge reopens a live session when its instructions, MCP servers or skills change.
+    setup_values = [prompt, server.url, session_servers]
+    if conversation.agent:
+        setup_values.append(skills)
+    setup = hashlib.sha256(to_json(setup_values)).hexdigest()
     await bridge.request(
         "start",
         conversationId=conversation.id,
@@ -609,7 +668,9 @@ async def upload_file(
 ) -> str:
     """Put a thread file in the conversation's folder in the agent's sandbox, beside the
     files its messages carry. The path the agent opens."""
-    host = await get_running_sandbox(session, conversation.account_id)
+    host = await get_running_sandbox(
+        session, conversation.account_id, scoped_to=conversation.sandbox_scope
+    )
     try:
         conversation_root = f"{get_work_root(host.ssh_username)}/chat/{conversation.id}"
         # The poster names the file. Only the base name joins the sandbox path.
@@ -803,13 +864,15 @@ async def report_result(session: AsyncSession, run: Run, *, result) -> str | Non
         body = NO_RESULT_MESSAGE.format(run=run.id)
     else:
         body = RESULT_MESSAGE.format(run=run.id, result=to_json(result, fallback=str).decode())
-    return await report_outcome(session, run, body)
+    return await report_outcome(session, run.conversation_id, body)
 
 
 async def report_failure(session: AsyncSession, run: Run, *, failure: str) -> str | None:
     """Report a run's failure to the chat that started it, whether or not the run waited
     for an answer. Returns the conversation to deliver."""
-    return await report_outcome(session, run, FAILURE_MESSAGE.format(run=run.id, failure=failure))
+    return await report_outcome(
+        session, run.conversation_id, FAILURE_MESSAGE.format(run=run.id, failure=failure)
+    )
 
 
 @DBOS.workflow(name=POST_CANCEL_WORKFLOW)
@@ -831,7 +894,7 @@ async def report_cancel(run_id: str) -> str | None:
     async with step_session() as session:
         run = await session.get(Run, run_id)
         body = CANCELLED_MESSAGE.format(run=run.id, reason=run.failure or "none given")
-        return await report_outcome(session, run, body)
+        return await report_outcome(session, run.conversation_id, body)
 
 
 async def report_quota_wait(session: AsyncSession, run: Run, *, resumes_at: datetime) -> None:
@@ -851,13 +914,15 @@ async def report_quota_wait(session: AsyncSession, run: Run, *, resumes_at: date
 async def report_quota_resume(session: AsyncSession, run: Run) -> str | None:
     """Tell the chat that started a run that it continues after its usage-limit wait.
     Returns the conversation to deliver."""
-    return await report_outcome(session, run, QUOTA_RESUMED_MESSAGE.format(run=run.id))
+    return await report_outcome(
+        session, run.conversation_id, QUOTA_RESUMED_MESSAGE.format(run=run.id)
+    )
 
 
-async def report_outcome(session: AsyncSession, run: Run, body: str) -> str | None:
-    """Keep the outcome in the run's chat. Returns the conversation to deliver, unless its
+async def report_outcome(session: AsyncSession, conversation_id: str, body: str) -> str | None:
+    """Keep the outcome in the chat. Returns the conversation to deliver, unless its
     channel runs no turns."""
-    conversation = await session.get(Conversation, run.conversation_id)
+    conversation = await session.get(Conversation, conversation_id)
     await conversation.create_message(session, body, is_internal=True)
     channel = conversation.channel
     if not channel or channel.has_turns:
@@ -887,7 +952,9 @@ async def cancel_turn(session: AsyncSession, conversation: Conversation, message
         await session.refresh(message)
         await session.commit()
         if message.state == MessageState.DELIVERED:
-            host = await get_running_sandbox(session, conversation.account_id)
+            host = await get_running_sandbox(
+                session, conversation.account_id, scoped_to=conversation.sandbox_scope
+            )
             try:
                 await Bridge(host).request(
                     "cancel", conversationId=conversation.id, messageId=message.id

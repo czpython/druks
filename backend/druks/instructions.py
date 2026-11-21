@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.apps.exceptions import AppBotError
 from druks.apps.loader import resolve_app
-from druks.apps.registry import agents, bots
+from druks.apps.registry import bots, instructions
 from druks.browser.agent_browsers import AgentBrowser
 from druks.browser.enums import BrowserClient
 from druks.chat.bots.dependencies import BotUser
@@ -42,10 +42,12 @@ from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.models import SecretRef
 from druks.secrets.enums import SecretKind
 from druks.settings import get_settings
+from druks.skills.models import Skill
 from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, _post_to_chat, current_workflow
 
 if TYPE_CHECKING:
+    from druks.agents.models import Agent
     from druks.browser.sessions import BrowserSession
     from druks.harnesses.base import Harness
     from druks.sandbox.datastructures import AgentResult
@@ -53,7 +55,7 @@ if TYPE_CHECKING:
     from druks.services.base import ServiceField
     from druks.workspaces import Workspace
 
-__all__ = ["Agent", "AgentOutput", "Bot", "BotUser"]
+__all__ = ["Instruction", "InstructionOutput", "Bot", "BotUser"]
 
 _QUOTA_FALLBACK_WAIT_SECONDS = 30 * 60
 _QUOTA_MAX_WAIT_SECONDS = 6 * 60 * 60
@@ -64,8 +66,8 @@ _QUOTA_TOPIC = "agents.quota"
 _in_after_agent: ContextVar[bool] = ContextVar("_in_after_agent", default=False)
 
 
-class AgentOutput(BaseModel):
-    """Base for an agent's structured output contract — the model an ``Agent``
+class InstructionOutput(BaseModel):
+    """Base for an instruction's structured output contract — the model an ``Instruction``
     declares as its ``contract``. The harness sends the model's schema to OpenAI's
     strict structured-output validator on a Codex model, which requires every
     object node to set ``additionalProperties: false`` and list every property in
@@ -77,8 +79,8 @@ class AgentOutput(BaseModel):
 
     def to_result(self) -> Any:
         # What the caller gets back from an agent call: the validated output itself
-        # by default. Override to map the strict agent output onto a looser domain
-        # type — the seam that keeps the agent contract out of durable records,
+        # by default. Override to map the strict output onto a looser domain
+        # type — the seam that keeps the output contract out of durable records,
         # applied by the call so no caller ever invokes it.
         return self
 
@@ -94,17 +96,17 @@ class AgentOutput(BaseModel):
 
 
 @dataclass(frozen=True)
-class Agent:
-    contract: type[AgentOutput]
+class Instruction:
+    contract: type[InstructionOutput]
     # Display label for the settings UI; the attribute name shows when it's None.
     name: str | None = None
-    # Short human-friendly blurb of what the agent does, shown in the settings UI.
+    # Short human-friendly blurb of what the instruction does, shown in the settings UI.
     description: str = ""
-    # The prompt template ``run`` renders. None for agents that build their
+    # The prompt template ``run`` renders. None for instructions that build their
     # prompt inline and drive the harness themselves (planning) instead of
     # going through ``run``.
     prompt: str | None = None
-    # Declared run timeout in seconds, overridable per agent; None inherits the
+    # Declared run timeout in seconds, overridable per instruction; None inherits the
     # harness default. How long a step may take is a fact about the task; the
     # model and the effort are the operator's, set in Settings.
     timeout: int | None = None
@@ -112,7 +114,7 @@ class Agent:
     # that hit no MCP server.
     include_plugins: bool = True
     # ``include_mcp=False`` gives the call no MCP server and its sandbox no
-    # server entry, for an agent that reads untrusted content.
+    # server entry, for an instruction that reads untrusted content.
     include_mcp: bool = True
     # The service secrets the call's sandbox holds, ``(Acme.fields.api_key,)``.
     # Each is a placeholder that the secrets proxy swaps at the service's host.
@@ -120,14 +122,14 @@ class Agent:
     # The saved browser session the call drives, and the client Druks starts
     # beside Chrome for it. The call gets the ``browser`` MCP server beside the
     # servers it has anyway.
-    # A session is mutable, so it stays out of the agent's hash.
+    # A session is mutable, so it stays out of the instruction's hash.
     browser: "BrowserSession | None" = field(default=None, compare=False)
     browser_client: BrowserClient | None = None
-    # ``id`` is the agent's durable key (settings, timeline, registry, step name):
-    # ``<app>.<attribute>`` for an agent declared on an App, or the explicit ``id=``
-    # of a standalone agent (a test, a one-off). ``app`` is the owning App's name,
+    # ``id`` is the instruction's durable key (settings, timeline, registry, step name):
+    # ``<app>.<attribute>`` for an instruction declared on an App, or the explicit ``id=``
+    # of a standalone instruction (a test, a one-off). ``app`` is the owning App's name,
     # read from the class in __set_name__ to group the settings UI — blank for a
-    # standalone agent (no owner).
+    # standalone instruction (no owner).
     id: str = field(default="", compare=False)
     app: str = field(init=False, compare=False, default="")
     _after_agent: list[Callable[..., Awaitable[str | None]]] = field(
@@ -137,11 +139,13 @@ class Agent:
     def __post_init__(self) -> None:
         if self.browser and self.browser_client != BrowserClient.PINCHTAB:
             raise TypeError(
-                "An agent with browser= needs browser_client=BrowserClient.PINCHTAB. "
+                "An instruction with browser= needs browser_client=BrowserClient.PINCHTAB. "
                 "Druks starts no other client for an agent call."
             )
         if self.browser_client and not self.browser:
-            raise TypeError("Agent(browser_client=...) needs browser=, the session it drives.")
+            raise TypeError(
+                "Instruction(browser_client=...) needs browser=, the session it drives."
+            )
         for secret in self.secrets:
             declared = f"{secret.service.__name__}.fields.{secret.name}"
             if not secret.is_secret:
@@ -155,25 +159,25 @@ class Agent:
                 raise TypeError(
                     f"{declared} belongs to an App key, which issues tokens; no sandbox holds it"
                 )
-        if self.id:  # an explicit id means a standalone agent — it registers itself now
-            agents.register(self)
+        if self.id:  # an explicit id means a standalone instruction — it registers itself now
+            instructions.register(self)
 
     def __set_name__(self, owner: type, attr: str) -> None:
         if self.id:  # explicit id: already registered in __post_init__
             return
         object.__setattr__(self, "id", f"{owner.name}.{attr}")
         object.__setattr__(self, "app", owner.name)
-        agents.register(self)
+        instructions.register(self)
 
     @classmethod
-    def get(cls, id: str) -> "Agent":
-        """The agent registered as ``id``, ``<app>.<attribute>``, loading its app first."""
-        if id not in agents:
+    def get(cls, id: str) -> "Instruction":
+        """The instruction registered as ``id``, ``<app>.<attribute>``, loading its app first."""
+        if id not in instructions:
             resolve_app(id.partition(".")[0])
-        agent = agents.get(id)
-        if not agent:
-            raise ObjectNotFound("agent", {"id": id})
-        return agent
+        instruction = instructions.get(id)
+        if not instruction:
+            raise ObjectNotFound("instruction", {"id": id})
+        return instruction
 
     def after_agent(
         self, hook: Callable[..., Awaitable[str | None]]
@@ -184,38 +188,46 @@ class Agent:
         return hook
 
     async def get_config(self) -> AgentConfig:
-        """How this agent runs for the current run's actor, read from settings now."""
+        """How this instruction runs for the current run's actor, read from settings now."""
         workflow = current_workflow.get(None)
         if not workflow:
-            raise WorkflowError(f"agent {self.id!r} reads its config only inside a workflow")
+            raise WorkflowError(f"instruction {self.id!r} reads its config only inside a workflow")
         return await get_config(db_session(), self.id, workflow.account_id)
 
     async def __call__(
-        self, *, contract: type[AgentOutput] | None = None, **context: object
+        self,
+        *,
+        contract: type[InstructionOutput] | None = None,
+        agent: "Agent | None" = None,
+        **context: object,
     ) -> Any:
-        """Run the agent — ``await SoftwareFactory.implement(...)`` — as a durable step in the
-        current workflow and return its parsed output. An agent run is always memoized —
+        """Run the instruction — ``await SoftwareFactory.implement(...)`` — as a durable step in the
+        current workflow and return its parsed output. An instruction run is always memoized —
         this picks which step does it: its own, or the @step it's already inside.
         workflow_id comes from the workflow context, not the caller; everything
         else (repo, …) is prompt context. ``contract`` overrides the output
-        contract for this call, including schema generation and validation."""
+        contract for this call, including schema generation and validation. ``agent``
+        runs the call as that saved agent: with its model, on its billing, and with
+        only its skills."""
         if not self.id:
             # Built loose — never assigned to an App, never given an explicit
             # id — so its settings, its registry entry and the call it would record
             # all key on nothing.
             raise WorkflowError(
-                "an agent runs under its own id — declare it on an App, or "
+                "an instruction runs under its own id — declare it on an App, or "
                 "pass id= for a standalone one"
             )
         workflow = current_workflow.get(None)
         if not workflow:
             raise WorkflowError(
-                f"agent {self.id!r} can only run inside a workflow; standalone agent "
+                f"instruction {self.id!r} can only run inside a workflow; standalone instruction "
                 "runs aren't supported yet"
             )
 
         async def _invoke() -> Any:
-            return await self._run(workflow_id=workflow.workflow_id, contract=contract, **context)
+            return await self._run(
+                workflow_id=workflow.workflow_id, contract=contract, agent=agent, **context
+            )
 
         if _in_step.get():
             transient_retry_index = 0
@@ -262,8 +274,9 @@ class Agent:
                     quota = await DBOS.run_step_async(
                         StepOptions(name=f"{workflow.kind}.agent.{self.id}.retry_wait"),
                         _quota_retry_wait,
-                        self.id,
+                        self,
                         workflow.account_id,
+                        agent,
                     )
                     # A far-off reset (an exhausted weekly window) isn't worth
                     # sleeping into — fail now.
@@ -277,7 +290,7 @@ class Agent:
                             functools.partial(report_quota_wait, resumes_at=quota["resumes_at"]),
                         )
                     # A wait that a switch ends does not use the retry.
-                    quota_retried = await self._wait_out_quota(workflow, quota)
+                    quota_retried = await self._wait_out_quota(workflow, quota, agent)
                     if workflow.conversation_id:
                         await _post_to_chat(
                             workflow.workflow_id, "chat.report_quota_resume", report_quota_resume
@@ -299,7 +312,7 @@ class Agent:
                 workflow.journal.add(result)
                 return result
 
-    async def _wait_out_quota(self, workflow, quota: dict) -> bool:
+    async def _wait_out_quota(self, workflow, quota: dict, agent: "Agent | None") -> bool:
         """Sleep until the quota resets. Return False early when the agent switches to another
         account, model, or billing."""
         wait_seconds = quota["wait_seconds"]
@@ -313,11 +326,21 @@ class Agent:
             wait_seconds = await DBOS.run_step_async(
                 StepOptions(name=f"{workflow.kind}.agent.{self.id}.wait_remaining"),
                 _quota_wait_remaining,
-                self.id,
+                self,
                 workflow.account_id,
+                agent,
                 quota,
             )
         return False
+
+    async def _get_config(
+        self, session: AsyncSession, account_id: str | None, agent: "Agent | None"
+    ) -> AgentConfig:
+        """How one call runs: as the saved agent when it has one, else by this
+        instruction's settings for the account."""
+        if agent:
+            return await agent.get_config(session)
+        return await get_config(session, self.id, account_id)
 
     @classmethod
     async def wake_runs_waiting_for_quota(cls, session: AsyncSession) -> None:
@@ -334,7 +357,8 @@ class Agent:
         self,
         *,
         workflow_id: str,
-        contract: type[AgentOutput] | None = None,
+        contract: type[InstructionOutput] | None = None,
+        agent: "Agent | None" = None,
         **context: Any,
     ) -> Any:
         """The raw execution: read what the call needs, provision or attach a host,
@@ -342,7 +366,7 @@ class Agent:
         wrapping + nesting. Each read is a unit of work of its own, so no
         connection sits idle through the boot, the preparation, or the run."""
         if not self.prompt:
-            raise WorkflowError(f"agent {self.id!r} has no prompt template to render")
+            raise WorkflowError(f"instruction {self.id!r} has no prompt template to render")
         contract = contract or self.contract
         workflow = current_workflow.get()
         if db_session.registry.has():
@@ -356,7 +380,7 @@ class Agent:
         async with step_session() as session:
             # Refusing an unservable call here beats provisioning a VM and
             # 401ing mid-run.
-            config = await get_config(session, self.id, workflow.account_id)
+            config = await self._get_config(session, workflow.account_id, agent)
             call_id = config.harness_class.mint_run_id(None)
             running = await AgentCall.lookup_running(session, workflow_id, self.id)
         model = config.model
@@ -425,10 +449,15 @@ class Agent:
                 harness = config.harness_class(
                     model=config.model, fast_mode=config.fast_mode, effort=config.effort
                 )
+                if agent:
+                    # An agent with no skills gets none, not the whole catalog.
+                    skills = await agent.list_enabled_skills(session)
+                else:
+                    requested = await workspace_class.get_skills(subject)
+                    delivered = await Skill.list_delivered(session, requested)
+                    skills = [skill.name for skill in delivered]
                 manifest = await harness.get_manifest(
-                    session,
-                    mcp_servers=mcp_servers,
-                    skills=await workspace_class.get_skills(subject),
+                    session, mcp_servers=mcp_servers, skills=skills
                 )
             # An agent browser's box holds the call's key, so the box belongs to
             # the call: it is never the warm box, and no other attempt resumes it.
@@ -569,8 +598,8 @@ class Agent:
         return uploaded
 
     def _parse_output(
-        self, contract: type[AgentOutput], result: "AgentResult"
-    ) -> tuple[AgentOutput, list[File]]:
+        self, contract: type[InstructionOutput], result: "AgentResult"
+    ) -> tuple[InstructionOutput, list[File]]:
         workspace_files: list[File] = []
         try:
             output = contract.model_validate(
@@ -578,12 +607,13 @@ class Agent:
             )
         except ValidationError as error:
             raise HarnessInvalidOutputError(
-                f"agent {self.id!r} returned a payload that fails {contract.__name__}: {error}"
+                f"instruction {self.id!r} returned a payload that fails "
+                f"{contract.__name__}: {error}"
             ) from error
         return output, workspace_files
 
     def _get_event_and_artifact(
-        self, contract: type[AgentOutput], output: AgentOutput
+        self, contract: type[InstructionOutput], output: InstructionOutput
     ) -> tuple[dict[str, str], dict[str, str]]:
         event = output.to_event()
         artifact = output.to_artifact()
@@ -610,11 +640,13 @@ class Agent:
         return harness.get_after_agent_reply("\n\n".join(text for text in texts if text))
 
 
-async def _quota_retry_wait(agent_id: str, account_id: str | None) -> dict:
+async def _quota_retry_wait(
+    instruction: Instruction, account_id: str | None, agent: "Agent | None"
+) -> dict:
     # Runs as its own step: replay reuses the recorded wait instead of
     # re-reading the scrape.
     async with step_session() as session:
-        config = await get_config(session, agent_id, account_id)
+        config = await instruction._get_config(session, account_id, agent)
         provider_id = config.model.partition("/")[0]
         scrape = await UsageScrape.latest_for(session, provider_id, config.charged_account_id)
     now = datetime.now(UTC)
@@ -635,9 +667,11 @@ async def _quota_retry_wait(agent_id: str, account_id: str | None) -> dict:
     }
 
 
-async def _quota_wait_remaining(agent_id: str, account_id: str | None, quota: dict) -> float:
+async def _quota_wait_remaining(
+    instruction: Instruction, account_id: str | None, agent: "Agent | None", quota: dict
+) -> float:
     async with step_session() as session:
-        config = await get_config(session, agent_id, account_id)
+        config = await instruction._get_config(session, account_id, agent)
     # Another account, model, or billing retries now.
     if (
         config.model != quota["model"]

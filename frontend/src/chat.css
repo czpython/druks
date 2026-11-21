@@ -125,6 +125,8 @@
 .chat-intro { margin: clamp(16px, 5vh, 56px) var(--chat-gutter) 12px; max-width: 65ch; }
 .chat-intro h1 { margin: 0 0 12px; font-size: clamp(24px, 2.5vw, 30px); line-height: 1.2; font-weight: 500; letter-spacing: -.02em; text-wrap: balance; }
 .chat-intro p { margin: 0 0 8px; color: var(--druks-color-text-secondary); font-size: 15px; line-height: 1.65; }
+.chat-agent-picker { display: flex; align-items: center; gap: 12px; margin: 16px 0 8px; color: var(--druks-color-text-secondary); font-size: 14px; }
+.chat-agent-picker .set-select { width: auto; min-width: 220px; }
 .chat-starters { margin: 0 var(--chat-gutter) 32px; }
 .chat-starters > button { display: flex; align-items: center; justify-content: space-between; gap: 24px; width: 100%; min-height: 60px; padding: 16px 2px; border-top: 1px solid var(--druks-color-border-default); text-align: left; color: var(--druks-color-text-secondary); font-size: 14px; line-height: 1.6; }
 .chat-starters > button:hover { color: var(--druks-color-accent); }
@@ -153,6 +155,7 @@
   .chat-list-row > .chat-pin { width: 44px; min-height: 44px; opacity: 1; right: 2px; bottom: 1px; }
   .chat-list-status { padding-right: 40px; }
   .chat-search input { min-height: 44px; font-size: 16px; }
+  .chat-agent-picker .set-select { height: 44px; font-size: 16px; }
   .chat-composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   .chat-composer textarea { min-height: 44px; font-size: 16px; }
   .chat-button, .chat-icon-button { min-height: 44px; }

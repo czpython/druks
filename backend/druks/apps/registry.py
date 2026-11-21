@@ -100,7 +100,7 @@ pages = Registry("pages", key=lambda page_route: page_route.key)
 apps = Registry("apps", key=lambda app: app.name)
 services = ServiceRegistry("services", key=lambda cls: cls.slug)
 workflows = Registry("workflows", key=lambda cls: cls.kind)
-agents = Registry("agents", key=lambda agent: agent.id)
+instructions = Registry("instructions", key=lambda instruction: instruction.id)
 bots = Registry("bots", key=lambda bot: bot.id)
 # The ways people reach a Bot. A channel's name is the source of its conversations.
 channels = Registry("channels", key=lambda cls: cls.name)

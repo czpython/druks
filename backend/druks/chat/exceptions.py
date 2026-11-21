@@ -20,6 +20,10 @@ class ChatHarnessError(ChatError):
     is_retryable = False
 
 
+class ChatAgentRefusedError(ChatHarnessError):
+    """The conversation's agent no longer answers its person, so a retry cannot help."""
+
+
 class ChatHarnessNotConnectedError(ChatHarnessError):
     """The Chat agent's provider is not connected."""
 

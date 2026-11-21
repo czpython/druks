@@ -34,7 +34,7 @@ them, copy the same files from a newer release.
 
 - The work sidebar and searchable installed app roster
 - Settings
-- Dashboard, Chat, Activity, Usage, and Schedules
+- Dashboard, Chat, Activity, Usage, Schedules, and Agents
 - Shared routing and fallback behavior.
 
 `src/components/Page.tsx` owns page width, outer spacing, and scrolling. Use
@@ -56,8 +56,8 @@ Import the module one time from `src/apps/index.ts`. The shell finds the
 registration and does not hardcode the app name.
 
 The work sidebar keeps the same destinations across app pages. The Dashboard
-opens at `/`. Activity, Usage, and Schedules have shared routes. Schedules appears
-directly below Usage. App-declared navigation appears below the page
+opens at `/`. Activity, Usage, Schedules, and Agents have shared routes. Schedules appears
+directly below Usage, and Agents below Schedules. App-declared navigation appears below the page
 header. Settings opens from the bottom of the sidebar. Below 650 px, a
 navigation button opens a modal drawer. Escape closes the drawer and returns
 focus to the button.
@@ -71,12 +71,12 @@ operator scrolls up. See the [Chat guide](../docs/chat.md) for message states
 and recovery limits.
 
 Settings use `/settings/<section>` routes. `/settings/personal` edits the current
-account's preferences through `/api/settings/personal`. `/settings/agents` edits
+account's preferences through `/api/settings/personal`. `/settings/instructions` edits
 shared execution defaults through `/api/settings`. The
 preferences provider uses the personal endpoint for timestamp display and theme
 selection. Preferences does not depend on execution catalogs. All accounts
-use the shared execution defaults in Agents and the app agent overrides. Search
-matches section names and app field labels. Preferences and Agents
+use the shared execution defaults in Instructions and the app instruction overrides. Search
+matches section names and app field labels. Preferences and Instructions
 retain separate drafts across settings pages. Save changes applies only the current page.
 Leaving Settings offers Save, Discard, and Stay. Save applies each dirty page;
 a failed request keeps the operator on that page with its draft. Resource
@@ -89,7 +89,7 @@ and login windows at `/settings/connections?tab=browser`.
 
 App settings use `/apps/<name>/settings` in the work context. A gear beside the
 app name in the header opens this route. Settings search also links to app settings.
-Options, Agents, and Bots appear only when the app declares those controls. These
+Options, Instructions, and Bots appear only when the app declares those controls. These
 sections share one app draft. Leaving the app form offers Save, Discard, and
 Stay. An app without controls has no Settings destination. Backend app schemas
 supply these forms without a frontend module. Schedule controls use the
@@ -112,6 +112,20 @@ does. The page shows the installation timezone. Next-run estimates use that time
 Each row shows the latest eight DBOS schedule invocations, including dispatch ticks.
 These records exclude downstream runs. Run now calls
 `POST /api/dashboard/schedules/{kind}/run` and works while a schedule is paused.
+
+Agents at `/agents` lists the agents a person can see and edits them
+through `/api/agents`. The owner or an admin edits or deletes an agent.
+Only an admin changes its owner. The skill choices are the skills enabled in
+Settings → Skills. A private agent offers subscription models. A public agent
+offers the models that the installation's API key runs or, without one, the
+models that the unattended account's subscription runs.
+
+An agent's name opens its page at `/agents/:id`. The page lists the schedules set
+in the agent's conversations, each with its owner and its last run and how it
+ended. See [Schedules](../docs/chat.md#schedules) for who stops one. The page
+also lists the runs the agent started, each with its cost. It shows the cost of
+this week's runs, from Monday 00:00 in the timezone of the viewer's account. The
+server calculates that total.
 
 Normal interface text uses IBM Plex Sans at 15 px. Technical values use
 IBM Plex Mono. Phone inputs use at least 16 px.

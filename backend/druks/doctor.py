@@ -19,9 +19,8 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .accounts.models import Account
-from .agents import Agent
 from .apps.loader import iter_apps, register_apps
-from .apps.registry import _ROLES, agents, autodiscover, services, webhooks, workflows
+from .apps.registry import _ROLES, autodiscover, services, webhooks, workflows
 from .browser.sessions import BrowserSession
 from .chat.bridge import Bridge
 from .chat.channels.base import Channel
@@ -473,8 +472,6 @@ def _defined_capability(module: ModuleType) -> tuple[str, str] | None:
             and value.__module__ == name
         ):
             return "services", value.slug
-        if isinstance(value, Agent) and value.module == name:
-            return "agents", value.name
         if (
             isinstance(value, type)
             and issubclass(value, Channel)
@@ -492,7 +489,6 @@ def check_capability_modules(settings: Settings) -> CheckResult:
     by_role = {
         "workflows": workflows,
         "webhooks": webhooks,
-        "agents": agents,
         "services": services,
     }
     packages = [app.package for app in iter_apps()]

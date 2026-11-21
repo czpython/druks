@@ -474,6 +474,8 @@ async def _notify_conversation(workflow_id: str, subject: dict[str, Any]) -> boo
     async def _create() -> str | None:
         async with step_session() as session:
             run = await session.get(Run, workflow_id)
+            if not run.conversation_id:
+                return
             conversation = await session.get(Conversation, run.conversation_id)
             channel = conversation.channel
             ask = run.input_request or {}
@@ -529,7 +531,10 @@ async def _post_to_chat(workflow_id: str, name: str, post: Callable) -> None:
     # the conversation, the conversation's agent takes its message from there.
     async def _post() -> str | None:
         async with step_session() as session:
-            return await post(session, await session.get(Run, workflow_id))
+            run = await session.get(Run, workflow_id)
+            # Deleting an agent deletes its conversations.
+            if run.conversation_id:
+                return await post(session, run)
 
     conversation_id = await DBOS.run_step_async(StepOptions(name=name, **_IO_RETRIES), _post)
     if conversation_id:

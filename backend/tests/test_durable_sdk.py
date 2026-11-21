@@ -10,15 +10,22 @@ import psycopg
 import pytest
 from dbos import DBOS, DBOSClient
 from dbos._error import DBOSQueueDeduplicatedError
-from druks.accounts.context import Actor, current_account_id, current_actor
-from druks.accounts.models import Account
-from druks.agents import Agent, AgentOutput
+from druks import exceptions
+from druks.accounts.context import Actor, current_account_id, current_actor, current_conversation_id
+from druks.accounts.dependencies import current_session_account
+from druks.accounts.enums import Role
+from druks.accounts.models import Account, PersonalAccessToken
+from druks.agents.models import Agent
+from druks.agents.routes import router as agents_router
+from druks.api.dependencies import request_session
+from druks.api.schedules import router as schedules_router
+from druks.api.server import _permission_denied_handler, _validation_error_handler
 from druks.apps.loader import iter_apps, register_workflow_package
-from druks.apps.registry import Registry, agents, workflows
+from druks.apps.registry import Registry, instructions, workflows
 from druks.browser.enums import BrowserSessionPayloadFormat, BrowserSessionStatus
 from druks.browser.exceptions import BrowserSessionSignedOutError
 from druks.browser.models import StoredBrowserSession
-from druks.chat.constants import CANCELLED_MESSAGE
+from druks.chat.constants import CANCELLED_MESSAGE, CONVERSATION_HEADER, SKIPPED_MESSAGE
 from druks.chat.models import Conversation, Message
 from druks.database import configure_session, get_session, session_scope
 from druks.db import atomic, db_session
@@ -29,15 +36,20 @@ from druks.durable.engine import (
     _workflow_schedules,
     apply_schedules,
     configure_engine,
+    get_dbos_client,
     init_dbos,
     launch,
     shutdown,
     trigger_schedule,
 )
 from druks.durable.enums import AgentCallStatus, WorkflowEvent
-from druks.durable.models import AgentCall, Artifact
+from druks.durable.exceptions import ScheduleSkipped
+from druks.durable.models import AgentCall, Artifact, Schedule
+from druks.durable.schedules import apply_schedule, run_schedule
 from druks.events.models import Event
 from druks.exceptions import PermissionDenied, SessionNotBoundError
+from druks.instructions import Instruction, InstructionOutput
+from druks.mcp.server import create_mcp_app
 from druks.models import StoredSubject
 from druks.sandbox.datastructures import AgentResult
 from druks.secrets.datastructures import Audience
@@ -46,12 +58,13 @@ from druks.secrets.models import VaultSecret
 from druks.settings import Settings, configure_settings, get_settings
 from druks.signals import subscribe
 from druks.teams.models import Team
-from druks.testing import init_db
+from druks.testing import asgi_client, init_db
 from druks.user_settings.models import InstallationSettings, SettingsOverride
 from druks.workflows import GATE_TTL_SECONDS, Gate, OperatorReply, Subject, Workflow, step, task
 from druks.workspaces import Workspace
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
+from fastapi import Depends, FastAPI
 from pydantic import ValidationError
 from sqlalchemy import NullPool, column, create_engine, delete, func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -75,12 +88,12 @@ pytestmark = [
 ]
 
 
-class Decision(AgentOutput):
+class Decision(InstructionOutput):
     # DBOS must be able to pickle this step result.
     action: str
 
 
-class ReviewResult(AgentOutput):
+class ReviewResult(InstructionOutput):
     action: str
 
     def to_artifact(self) -> dict[str, str]:
@@ -192,7 +205,7 @@ async def runtime():
                 raise FatalError("closed at review")
 
     class AgentFlow(Workflow):
-        DECIDER = Agent(id="decider", contract=Decision, prompt="t")
+        DECIDER = Instruction(id="decider", contract=Decision, prompt="t")
 
         async def run(self, repo: str) -> None:
             decision = await self.DECIDER(body="x")
@@ -349,6 +362,8 @@ async def runtime():
                 raise asyncio.CancelledError("Simulated worker interruption")
 
     configure_settings(Settings(database_url=URL))  # pyright: ignore[reportCallIssue]
+    # An earlier module may have built the client on its own database.
+    get_dbos_client.cache_clear()
     init_dbos()
     await launch()
     try:
@@ -384,7 +399,7 @@ async def runtime():
         await engine.dispose()
         schema_engine.dispose()
 
-        agents._items.pop("decider", None)
+        instructions._items.pop("decider", None)
         workflows._items.pop("sample_flow", None)
         workflows._items.pop("agent_flow", None)
         workflows._items.pop("agent_body_flow", None)
@@ -745,7 +760,7 @@ async def test_a_quota_wake_reaches_only_the_runs_waiting_out_a_quota(runtime):
 
         await asyncio.wait_for(waiting(), 15)
         async with session_scope(runtime.engine) as session:
-            await Agent.wake_runs_waiting_for_quota(session)
+            await Instruction.wake_runs_waiting_for_quota(session)
 
         await _wait_for_run(runtime.engine, quota_id, lambda run: run.state == RunState.FINISHED)
         assert (await _get_run(runtime.engine, checks_id)).state == RunState.RUNNING
@@ -971,7 +986,7 @@ async def test_run_agent_step(runtime, monkeypatch):
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "stop"}, seen, held),
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
 
     workflow_id = await runtime.AgentFlow.start(subject=None, repo="owner/app")
     failed = await _wait_for_run(
@@ -1006,7 +1021,7 @@ async def test_body_level_agent_output_lands_on_the_journal(runtime, monkeypatch
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "ship"}, seen, held),
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
 
     workflow_id = await runtime.AgentBodyFlow.start(subject=None, repo="owner/app")
     await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
@@ -1209,6 +1224,67 @@ async def test_a_run_starts_only_as_an_account_that_can_use_the_app(runtime, mon
         await tick(datetime.now(UTC), None)
 
     assert SINK.count("swept") == swept
+
+
+async def test_an_ask_to_an_agent_starts_a_run_as_the_asker_who_can_use_the_app(
+    runtime, monkeypatch
+):
+    owner_id = await _account_id(runtime.engine, "agent-owner@example.com")
+    asker_id = await _account_id(runtime.engine, "agent-asker@example.com")
+    outsider_id = await _account_id(runtime.engine, "agent-outsider@example.com")
+    monkeypatch.setattr(runtime.RecordFeedback, "app", "field_notes")
+    async with session_scope(runtime.engine) as session:
+        agent = await Agent.create(
+            session,
+            owner=await session.get(Account, owner_id),
+            name="Feedback recorder",
+            description="Records feedback.",
+            instructions="Record the feedback you are given.",
+            skills=[],
+            harness="claude",
+            model="anthropic/claude-opus-4-7",
+            is_private=False,
+        )
+        asked = await Conversation.create(
+            session, account_id=asker_id, body="Record it", agent_id=agent.id
+        )
+        refused = await Conversation.create(
+            session, account_id=outsider_id, body="Record it", agent_id=agent.id
+        )
+        team = await Team.create(
+            session, name="Feedback", member_ids=[asker_id], apps=["field_notes"]
+        )
+
+    # A tool call from the agent's box binds the asker and the conversation, as
+    # current_account does for its request.
+    try:
+        account_token = current_account_id.set(asker_id)
+        conversation_token = current_conversation_id.set(asked.id)
+        try:
+            workflow_id = await runtime.RecordFeedback.start(subject=None, repo="owner/asked")
+        finally:
+            current_account_id.reset(account_token)
+            current_conversation_id.reset(conversation_token)
+        account_token = current_account_id.set(outsider_id)
+        conversation_token = current_conversation_id.set(refused.id)
+        try:
+            with pytest.raises(PermissionDenied):
+                await runtime.RecordFeedback.start(subject=None, repo="owner/refused")
+        finally:
+            current_account_id.reset(account_token)
+            current_conversation_id.reset(conversation_token)
+    finally:
+        # The runtime's database outlives this test. A team that lists field_notes would
+        # keep every later account outside it out of the app.
+        async with session_scope(runtime.engine) as session:
+            await (await Team.get(session, id=team.id)).delete()
+    await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.FINISHED)
+
+    async with session_scope(runtime.engine) as session:
+        runs = await Run.list_for_agent(
+            session, agent.id, kinds=[runtime.RecordFeedback.kind], limit=20
+        )
+    assert [(run.id, run.account_id) for run in runs] == [(workflow_id, asker_id)]
 
 
 async def test_an_event_actor_account_wins_over_the_supplied_account(runtime):
@@ -1810,7 +1886,7 @@ async def test_a_read_on_the_box_holds_no_connection(runtime, monkeypatch, body)
     monkeypatch.setattr(
         "druks.sandbox.client.Client.ephemeral", _fake_ephemeral_returning({"action": "go"}, [], [])
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
     seen: list[tuple[bool, bool]] = []
 
     class ReadingWorkspace(Workspace):
@@ -1928,7 +2004,7 @@ async def test_output_event_survives_completed_step_replay(runtime, monkeypatch)
         "druks.sandbox.client.Client.ephemeral",
         _fake_ephemeral_returning({"action": "reviewed"}, calls, held),
     )
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
     completed = []
 
     class OutputFlow(Workflow):
@@ -1973,7 +2049,7 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         _fake_ephemeral_returning({"gist": "The pump ran hot."}, calls, []),
     )
     monkeypatch.setattr("druks.workflows.get_template_id", AsyncMock(return_value="template-test"))
-    monkeypatch.setattr("druks.agents.get_template", _fake_template)
+    monkeypatch.setattr("druks.instructions.get_template", _fake_template)
     completed = []
     body = Summarize.run_multistep
 
@@ -2031,3 +2107,267 @@ async def test_field_notes_activity_through_admission_review_failure_and_replay(
         "workflow.finished",
     ]
     assert kinds[failed_id] == ["workflow.scheduled", "workflow.failed"]
+
+
+async def _make_schedule(runtime, *, owner: str = "op@example.com") -> Schedule:
+    account_id = await _account_id(runtime.engine, owner)
+    async with get_session(runtime.engine) as session:
+        conversation = await Conversation.create(
+            session, account_id=account_id, body="Scan payments every 2 hours"
+        )
+        schedule = await Schedule.create(
+            session,
+            account_id=account_id,
+            conversation_id=conversation.id,
+            tool="field_notes_scan",
+            arguments={"repo": "payments"},
+            cron="0 */2 * * *",
+            tool_names=["field_notes_scan"],
+        )
+        await session.commit()
+        return schedule
+
+
+async def test_a_due_time_whose_tool_refuses_the_call_fails_and_is_told_in_the_chat(
+    runtime, monkeypatch
+):
+    schedule = await _make_schedule(runtime)
+    called = []
+
+    async def call_tool(schedule_id):
+        called.append(schedule_id)
+        return {
+            "conversation_id": schedule.conversation_id,
+            "tool": schedule.tool,
+            "reason": "No repository is named payments.",
+        }
+
+    monkeypatch.setattr("druks.durable.schedules.call_tool", call_tool)
+
+    with pytest.raises(ScheduleSkipped, match="No repository is named payments."):
+        await run_schedule(datetime.now(UTC), {"schedule_id": schedule.id})
+
+    assert called == [schedule.id]
+    async with get_session(runtime.engine) as session:
+        notes = list(
+            await session.scalars(
+                select(Message.body).where(
+                    Message.conversation_id == schedule.conversation_id, Message.is_internal
+                )
+            )
+        )
+    assert notes == [
+        SKIPPED_MESSAGE.format(tool="field_notes_scan", reason="No repository is named payments.")
+    ]
+    deliveries = await DBOS.list_workflows_async(name="chat.deliver")
+    assert [each.input["args"] for each in deliveries].count((schedule.conversation_id,)) == 1
+
+
+@pytest.mark.parametrize(
+    ("cron", "refusal"),
+    # DBOS would read a sixth field as seconds at the start.
+    [("0 */2 * * * 0", "is not a cron"), ("0 9 30 2 *", "never comes due")],
+)
+async def test_a_schedule_needs_a_five_field_cron_that_comes_due(cron, refusal):
+    with pytest.raises(exceptions.ValidationError, match=refusal):
+        await Schedule.create(
+            SimpleNamespace(),
+            account_id="a",
+            conversation_id="c",
+            tool="field_notes_scan",
+            arguments={},
+            cron=cron,
+            tool_names=["field_notes_scan"],
+        )
+
+
+async def test_a_schedule_needs_a_tool_that_exists():
+    with pytest.raises(exceptions.ValidationError, match="No tool is named 'field_notes_scna'"):
+        await Schedule.create(
+            SimpleNamespace(),
+            account_id="a",
+            conversation_id="c",
+            tool="field_notes_scna",
+            arguments={},
+            cron="0 9 * * *",
+            tool_names=["field_notes_scan"],
+        )
+
+
+async def test_apply_schedules_keeps_a_persons_schedules_in_the_installation_timezone(
+    runtime, monkeypatch
+):
+    schedule = await _make_schedule(runtime)
+    await apply_schedule(schedule)
+    async with session_scope(runtime.engine) as session:
+        await apply_schedules(session)
+    assert await DBOS.get_schedule_async(schedule.schedule_name)
+    settings = engine.get_settings().model_copy(update={"timezone": "Europe/Madrid"})
+    monkeypatch.setattr(engine, "get_settings", lambda: settings)
+
+    async with session_scope(runtime.engine) as session:
+        await apply_schedules(session)
+
+    row = await DBOS.get_schedule_async(schedule.schedule_name)
+    assert (row["cron_timezone"], row["context"]) == ("Europe/Madrid", {"schedule_id": schedule.id})
+    await DBOS.delete_schedule_async(schedule.schedule_name)
+
+
+async def test_a_person_makes_their_schedule_in_a_chat_and_only_they_change_it(
+    runtime,
+):
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.add_exception_handler(PermissionDenied, _permission_denied_handler)
+    api.add_exception_handler(exceptions.ValidationError, _validation_error_handler)
+    api.include_router(schedules_router)
+    # The MCP surface names the tools a schedule may call.
+    create_mcp_app(api)
+    owner_id = await _account_id(runtime.engine, "planner@example.com")
+    other_id = await _account_id(runtime.engine, "other@example.com")
+    async with get_session(runtime.engine) as session:
+        chat = await Conversation.create(session, account_id=owner_id, body="Scan payments")
+        _, owner_token = await PersonalAccessToken.create(session, account_id=owner_id, name="o")
+        _, other_token = await PersonalAccessToken.create(session, account_id=other_id, name="x")
+        await session.commit()
+    owner = {"Authorization": f"Bearer {owner_token}"}
+    other = {"Authorization": f"Bearer {other_token}"}
+    scan = {"tool": "list_schedules", "arguments": {}, "cron": "0 */2 * * *"}
+    change = {"tool": "list_schedules", "arguments": {"page": 2}, "cron": "0 9 * * *"}
+
+    async with asgi_client(api) as client:
+        nowhere = await client.post("/api/schedules", json=scan, headers=owner)
+        unknown = await client.post(
+            "/api/schedules",
+            json={**scan, "tool": "list_schedulez"},
+            headers={**owner, CONVERSATION_HEADER: chat.id},
+        )
+        made = await client.post(
+            "/api/schedules", json=scan, headers={**owner, CONVERSATION_HEADER: chat.id}
+        )
+        schedule_id = made.json()["id"]
+        name = f"schedule:{schedule_id}"
+        made_in_dbos = await DBOS.get_schedule_async(name)
+        listed = await client.get("/api/schedules", headers=owner)
+        hidden = await client.get("/api/schedules", headers=other)
+        refused = await client.put(f"/api/schedules/{schedule_id}", json=change, headers=other)
+        changed = await client.put(f"/api/schedules/{schedule_id}", json=change, headers=owner)
+        changed_in_dbos = await DBOS.get_schedule_async(name)
+        kept = await client.delete(f"/api/schedules/{schedule_id}", headers=other)
+        stopped = await client.delete(f"/api/schedules/{schedule_id}", headers=owner)
+
+    assert (nowhere.status_code, unknown.status_code, made.status_code) == (422, 422, 201)
+    assert made.json()["conversationId"] == chat.id
+    assert (made_in_dbos["schedule"], made_in_dbos["context"]) == (
+        "0 */2 * * *",
+        {"schedule_id": schedule_id},
+    )
+    assert [each["id"] for each in listed.json()] == [schedule_id]
+    assert hidden.json() == []
+    assert (refused.status_code, kept.status_code) == (404, 403)
+    assert (changed.json()["arguments"], changed_in_dbos["schedule"]) == (
+        {"page": 2},
+        "0 9 * * *",
+    )
+    assert stopped.status_code == 204
+    assert not await DBOS.get_schedule_async(name)
+    async with get_session(runtime.engine) as session:
+        assert not await session.get(Schedule, schedule_id)
+
+
+async def test_an_admin_stops_another_persons_schedule(runtime):
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.include_router(schedules_router)
+    schedule = await _make_schedule(runtime)
+    await apply_schedule(schedule)
+    async with get_session(runtime.engine) as session:
+        admin = Account(username="admin@example.com", role=Role.ADMIN)
+        session.add(admin)
+        await session.flush()
+        _, token = await PersonalAccessToken.create(session, account_id=admin.id, name="a")
+        await session.commit()
+
+    async with asgi_client(api) as client:
+        stopped = await client.delete(
+            f"/api/schedules/{schedule.id}", headers={"Authorization": f"Bearer {token}"}
+        )
+
+    assert stopped.status_code == 204
+    assert not await DBOS.get_schedule_async(schedule.schedule_name)
+
+
+async def test_deleting_an_agent_stops_the_schedules_set_in_its_conversations(runtime):
+    api = FastAPI(dependencies=[Depends(request_session)])
+    api.include_router(agents_router)
+    owner_id = await _account_id(runtime.engine, "agent-deleter@example.com")
+    async with session_scope(runtime.engine) as session:
+        owner = await session.get(Account, owner_id)
+        agent = await Agent.create(
+            session,
+            owner=owner,
+            name="Payments scanner",
+            description="Scans payments.",
+            instructions="Scan the repo.",
+            skills=[],
+            harness="claude",
+            model="anthropic/claude-opus-4-7",
+            is_private=False,
+        )
+        conversation = await Conversation.create(
+            session, account_id=owner_id, body="Scan payments", agent_id=agent.id
+        )
+        schedule = await Schedule.create(
+            session,
+            account_id=owner_id,
+            conversation_id=conversation.id,
+            tool="field_notes_scan",
+            arguments={"repo": "payments"},
+            cron="0 */2 * * *",
+            tool_names=["field_notes_scan"],
+        )
+    await apply_schedule(schedule)
+    assert await DBOS.get_schedule_async(schedule.schedule_name)
+    api.dependency_overrides[current_session_account] = lambda: owner
+
+    async with asgi_client(api) as client:
+        deleted = await client.delete(f"/api/agents/{agent.id}")
+
+    assert deleted.status_code == 204
+    assert not await DBOS.get_schedule_async(schedule.schedule_name)
+
+
+async def test_a_run_finishes_after_its_chat_is_deleted_with_its_agent(runtime):
+    class ChatRun(Workflow):
+        async def run_multistep(self) -> None:
+            await DBOS.recv_async("finish")
+
+    owner_id = await _account_id(runtime.engine, "op@example.com")
+    async with session_scope(runtime.engine) as session:
+        agent = await Agent.create(
+            session,
+            owner=await session.get(Account, owner_id),
+            name="Release manager",
+            description="Ships releases.",
+            instructions="Ship the release.",
+            skills=[],
+            harness="claude",
+            model="anthropic/claude-opus-4-7",
+            is_private=False,
+        )
+        conversation = await Conversation.create(
+            session, account_id=owner_id, body="Ship it", agent_id=agent.id
+        )
+    conversation_token = current_conversation_id.set(conversation.id)
+    try:
+        workflow_id = await ChatRun.start(subject=None)
+    finally:
+        current_conversation_id.reset(conversation_token)
+    try:
+        await _wait_for_run(runtime.engine, workflow_id, lambda run: run.state == RunState.RUNNING)
+        async with session_scope(runtime.engine) as session:
+            await (await Agent.get(session, id=agent.id)).delete()
+        await DBOS.send_async(workflow_id, "done", topic="finish")
+
+        handle = await DBOS.retrieve_workflow_async(workflow_id)
+        await asyncio.wait_for(handle.get_result(), timeout=15)
+    finally:
+        workflows._items.pop(ChatRun.kind)

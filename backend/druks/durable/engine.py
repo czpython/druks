@@ -13,7 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.database import create_async_engine_from_url, session_scope
 from druks.db import AutocommitSession, db_session
-from druks.durable.constants import NOTIFICATIONS_QUEUE, PAUSE_QUEUE, RUN_QUEUE, TASK_QUEUE
+from druks.durable.constants import (
+    NOTIFICATIONS_QUEUE,
+    PAUSE_QUEUE,
+    RUN_QUEUE,
+    RUN_SCHEDULE_WORKFLOW,
+    TASK_QUEUE,
+)
 from druks.durable.dbos_state import DBOS_SYSTEM_SCHEMA, workflow_status
 from druks.durable.exceptions import FatalError, ScheduleUnavailable
 from druks.harnesses.exceptions import HarnessError
@@ -93,12 +99,33 @@ async def apply_schedules(session: AsyncSession) -> None:
     declared = {workflow.kind for workflow, _ in _workflow_schedules} | {
         name for name, _, _ in _task_schedules
     }
-    existing = {row["schedule_name"]: row for row in await DBOS.list_schedules_async()}
+    rows = await DBOS.list_schedules_async()
+    # A person's schedules are rows, not declarations: this keeps them and only moves
+    # them to the installation timezone.
+    existing = {
+        row["schedule_name"]: row for row in rows if row["workflow_name"] != RUN_SCHEDULE_WORKFLOW
+    }
     for name in existing.keys() - declared:
         await DBOS.delete_schedule_async(name)
     # Evaluate in the installation timezone so daily cadence follows DST.
     # Personal display preferences must not move a shared schedule.
     timezone = get_settings().timezone
+    # DBOS.apply_schedules wants the function, and its module imports this one. The client
+    # takes the workflow by name.
+    await get_dbos_client().apply_schedules_async(
+        [
+            {
+                "schedule_name": row["schedule_name"],
+                "workflow_name": row["workflow_name"],
+                "schedule": row["schedule"],
+                "context": row["context"],
+                "cron_timezone": timezone,
+                "application_name": row["application_name"],
+            }
+            for row in rows
+            if row["workflow_name"] == RUN_SCHEDULE_WORKFLOW and row["cron_timezone"] != timezone
+        ]
+    )
     for workflow, entry in _workflow_schedules:
         cron = await workflow.get_schedule(session)
         current = existing.get(workflow.kind)

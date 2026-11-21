@@ -40,7 +40,7 @@ For app-surface changes, inspect the proof app at
   registration in the frontend build. Keep standalone `dist/` delivery separate.
 - Keep generic agent, harness, workspace, sandbox, event, gate, webhook, and
   settings plumbing in Druks. Keep domain-specific policy in the app.
-- One Druks installation serves one organization. Execution defaults and agent
+- One Druks installation serves one organization. Execution defaults and instruction
   overrides are shared. Accounts own credentials, personal preferences, and run
   attribution. Do not add personal execution defaults.
 - Grow the author surface by parameter, not by namespace. If the SDK lacks a
@@ -48,7 +48,7 @@ For app-surface changes, inspect the proof app at
   method to the class that holds the data. Do not add a namespace, facade,
   context object, or one-use helper module.
 - Do not import an app from an author-surface module. Import only
-  `druks.accounts`, `druks.workflows`, `druks.workspaces`, `druks.agents`, `druks.events`,
+  `druks.accounts`, `druks.workflows`, `druks.workspaces`, `druks.instructions`, `druks.events`,
   `druks.signals`, `druks.db`, `druks.schemas`, `druks.prompts`, `druks.durable`,
   `druks.apps`, `druks.ui`, and `druks.webhooks`. A reference to `druks.build` or another app in these modules
   inverts the platform. The builtin apps `core` and `chat` are platform code, so

@@ -11,10 +11,10 @@ from conftest import (
     make_jwt,
 )
 from drukbox_sdk import Secret
-from druks import agents
+from druks import instructions
 from druks.accounts.models import Account
 from druks.apps import App
-from druks.apps.registry import agents as agent_registry
+from druks.apps.registry import instructions as instruction_registry
 from druks.db import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses import providers as provider_module
@@ -42,8 +42,10 @@ from druks.workflows import WorkflowError, current_workflow
 from druks_field_notes.workflows import Summarize
 from sqlalchemy.exc import IntegrityError
 
-DECLARED = agents.Agent(id="config_declared", prompt="probe.md", contract=ConfigOutput, timeout=900)
-OVERSIZED = agents.Agent(
+DECLARED = instructions.Instruction(
+    id="config_declared", prompt="probe.md", contract=ConfigOutput, timeout=900
+)
+OVERSIZED = instructions.Instruction(
     id="config_oversized",
     prompt="probe.md",
     contract=ConfigOutput,
@@ -444,18 +446,18 @@ async def test_an_unregistered_agent_is_named(druks_db):
 async def test_two_apps_declare_the_same_agent_name(druks_db):
     class Ticketing(App):
         name = "ticketing"
-        file_tickets = agents.Agent(prompt="probe.md", contract=ConfigOutput)
+        file_tickets = instructions.Instruction(prompt="probe.md", contract=ConfigOutput)
 
     class BugHunter(App):
         name = "bug_hunter"
-        file_tickets = agents.Agent(
+        file_tickets = instructions.Instruction(
             name="File tickets", prompt="probe.md", contract=ConfigOutput, timeout=300
         )
 
     try:
         await connect_anthropic_subscription("a@example.com")
         await SettingsOverride.set_agent_effort(druks_db, BugHunter.file_tickets.id, "low")
-        declared = (Ticketing.agents(), BugHunter.agents())
+        declared = (Ticketing.instructions(), BugHunter.instructions())
         ticketing = await get_config(druks_db, Ticketing.file_tickets.id, None)
         bug_hunter = await get_config(druks_db, BugHunter.file_tickets.id, None)
         settings = [
@@ -469,7 +471,7 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
         ]
     finally:
         for app in (Ticketing, BugHunter):
-            agent_registry._items.pop(app.file_tickets.id)
+            instruction_registry._items.pop(app.file_tickets.id)
 
     assert (Ticketing.file_tickets.id, BugHunter.file_tickets.id) == (
         "ticketing.file_tickets",

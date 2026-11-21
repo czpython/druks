@@ -3,7 +3,6 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from druks.agents import Agent
 from druks.apps import App, AppSettings, Choices
 from druks.contrib.software_factory.contracts import (
     ContractRevisionOutput,
@@ -22,6 +21,7 @@ from druks.contrib.software_factory.ticketing.jira import Jira
 from druks.contrib.software_factory.ticketing.linear import Linear
 from druks.core import services
 from druks.doctor import CheckResult
+from druks.instructions import Instruction
 from druks.services import OauthRefreshError, ServiceNotConnectedError
 
 from .services import GithubReviewer
@@ -192,38 +192,39 @@ class SoftwareFactory(App):
             logger.warning("Could not get a Linear token for the tracker.", exc_info=True)
             return
 
-    # Any workflow of the app can run these agents. An agent id is ``software_factory.<name>``.
-    generate_plan = Agent(
+    # Any workflow of the app can run these instructions. An instruction id is
+    # ``software_factory.<name>``.
+    generate_plan = Instruction(
         description="ticket → implementation plan",
         prompt="software_factory/build/generate_plan.md",
         contract=PlanOutput,
     )
-    review_plan = Agent(
+    review_plan = Instruction(
         description="critiques the plan before any work starts",
         prompt="software_factory/build/review_plan.md",
         contract=ReviewOutput,
     )
-    revise_contract = Agent(
+    revise_contract = Instruction(
         description="revises the plan contract on feedback",
         prompt="software_factory/build/revise_contract.md",
         contract=ContractRevisionOutput,
     )
-    implement = Agent(
+    implement = Instruction(
         description="plan → diff, in a drukbox",
         prompt="software_factory/build/implement.md",
         contract=ImplementationOutput,
     )
-    triage_human_feedback = Agent(
+    triage_human_feedback = Instruction(
         description="routes a human's PR feedback back into the workflow",
         prompt="software_factory/build/triage_human_feedback.md",
         contract=TriageOutput,
     )
-    repo_profiler = Agent(
+    repo_profiler = Instruction(
         description="reads a repo once and reports its stack, verification commands, and skills",
         prompt="software_factory/profile/repo_profiler.md",
         contract=RepoProfilerOutput,
     )
-    review_pull_request = Agent(
+    review_pull_request = Instruction(
         description="reads a pull request and writes the review",
         prompt="software_factory/review/review_pull_request.md",
         contract=ReviewReport,

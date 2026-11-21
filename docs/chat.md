@@ -13,10 +13,12 @@ do not see the chats of an app's WhatsApp numbers: the people who hold the
 number's phone read them there. There is one exception: an operator who can use
 an app can read the calls of its phone numbers. See [Read a call](#read-a-call).
 
-Chat runs on Claude, Codex, or OpenCode. Its harness, model, billing, and
+Chat runs on Claude, Codex, or OpenCode. The Bot's harness, model, billing, and
 effort come from Chat's row in **Chat → Channels → Bots**. A field that you
 leave unset uses the
 [installation settings](configuration.md#personal-and-installation-settings).
+A conversation with an agent runs on the agent's harness and model: see
+[Talk to an agent](#talk-to-an-agent).
 OpenCode ignores the effort: its effort values are model variants, and Druks's
 levels are not among them. OpenCode uses only the provider of Chat's model, also
 when it names a conversation. If OpenCode's model list does not have the model,
@@ -36,6 +38,35 @@ New lines use Shift + Enter.
 
 The starter prompts fill the message field. They do not send a message.
 The new conversation page also lists the installed apps.
+
+## Talk to an agent
+
+An agent can answer a conversation instead of the Bot. In a new web
+conversation, choose the agent in **Talk to**. The list shows only the agents
+you can talk to. The conversation list and the conversation header show the
+agent's name.
+
+Everyone talks to a public agent. Only the owner of a private agent talks to
+it. The conversation keeps its agent. Once a private agent has another owner,
+or a public agent turns private, the next turn of everyone but its current owner
+fails.
+Each turn adds the agent's instructions to the Chat prompt. The turn runs on
+the agent's harness and model, with the tool sign-ins of the person who asks.
+Druks saves an agent only on a harness that Chat runs on: Claude, Codex, or
+OpenCode. A turn reads the agent when it starts, so an edit to the agent
+reaches the next turn.
+
+A private agent runs on its owner's subscription. With
+[Include apps](configuration.md#personal-and-installation-settings) on, it
+loads the apps of that subscription. A public agent runs on the installation's
+API key for the model's provider or, without one, on the unattended account's
+subscription. It never runs on the subscription of the person who asks. A
+public agent with neither fails its turn and says what to connect. A public
+agent never loads the apps of the subscription it runs on. Each person who
+talks to an agent gets a sandbox of their own for it.
+
+A workflow that an agent starts runs as the person who asks. That person must be
+able to use the workflow's app.
 
 ## Find and pin conversations
 
@@ -221,8 +252,9 @@ for the MCP address and edge requirements.
 
 ## Execution and recovery
 
-Each account has one leased sandbox that serves all its conversations. When
-the Chat credentials change, the next turn replaces the sandbox, and a turn
+Each account has one leased sandbox that serves its conversations with the Bot, and one
+more for each agent it talks to. Neither replaces the other. When a sandbox's
+credentials change, the next turn replaces that sandbox, and a turn
 still running in the old sandbox ends as `interrupted`. A detached
 bridge runs in the sandbox and starts one ACP adapter per conversation. Druks
 opens an SSH channel only when it communicates with the bridge.
@@ -325,6 +357,64 @@ nothing until a reminder does, and the person's replies reach no agent.
 lists the caller's reminders with each one's cron and next time.
 `chat_cancel_reminder` stops a reminder, and what it already sent stays in the
 conversation.
+
+## Schedules
+
+A schedule makes one of the agent's tool calls again and again on a cron. Say
+"review pull request 7 in acme/api every morning", and the agent calls
+`create_schedule` with the tool, its arguments, and the cron. The schedule
+belongs to the person who asked and to the conversation where they asked. An
+agent has no schedule of its own.
+
+| Field | What it holds | Example |
+| --- | --- | --- |
+| `tool` | The name of one of the agent's tools | `software_factory_review` |
+| `arguments` | The tool's arguments, the same at every call | `{"repo": "acme/api", "prNumber": 7}` |
+| `cron` | When to call, in local time | `0 9 * * *` |
+
+Druks checks that the tool exists and that the cron has five fields when the
+agent saves the schedule. Local time is the installation `timezone`, as for
+reminders.
+
+Each schedule has its own DBOS schedule, which fires at each due time. Druks then
+makes the tool call through its own MCP server. It calls as the owner, from the
+conversation, with the tools of the conversation's agent. So the call goes
+through the same checks as in the chat: the owner's app check, the tool's input
+check, and the route's own checks. A run that the call starts reports to the
+conversation, the same as a run that the chat started. When the tool refuses the
+call, or Druks cannot reach its own MCP server, Druks skips the call. The agent
+tells the person why in the conversation. DBOS records that due time as failed.
+The schedule goes on.
+
+A due time makes one call, also when two Druks servers run. An interrupted call
+can run again. A due time that passes while Druks is down is not called later.
+
+`list_schedules` lists the caller's schedules with each one's tool, arguments,
+cron, and next time. `change_schedule` replaces the tool, the arguments, and the
+cron of one of the caller's schedules. `stop_schedule` stops it, and the runs its
+calls already started go on. An admin can also stop another person's schedule.
+
+An agent's page lists the schedules set in the agent's conversations. Everyone
+who can see the agent sees them, each with its owner and its last run and how it
+ended.
+
+## Tasks
+
+Some asks fit no tool, such as "get the price from this site every 2 hours".
+For these, the agent calls `chat_run_instruction` with the task in words. The
+tool starts a `chat.run_instruction` run in a fresh sandbox. Like any run, it shows
+on the run page with its cost. In the sandbox, the conversation's agent does the
+task with its instructions and its model, on its billing, and with only its
+picked skills. In a chat without an agent, the call uses the model set for the
+`chat.run_instruction` instruction in Settings and every enabled skill. The run
+belongs to the person in the chat and reports the task with its answer, or its
+failure, to the conversation.
+
+To repeat a task, the agent schedules the tool:
+
+```json
+{"tool": "chat_run_instruction", "arguments": {"instruction": "Visit acme.test/kettle and get the price."}, "cron": "0 */2 * * *"}
+```
 
 ## WhatsApp
 
@@ -504,7 +594,7 @@ workflow that the typed message names, and a chat has at most one open pause.
 ## Slack
 
 Slack is a source for Chat. You write to the Druks bot in a direct message, or
-tag it in a room, and your own agent answers there, under your account and with
+tag it in a room, and the Bot answers there, under your account and with
 your whole toolkit.
 One Slack app serves every app in Druks. Connect the Slack card first: see
 [Slack](configuration.md#slack). **Chat → Channels** shows the workspace, the
@@ -531,7 +621,8 @@ room.
 
 ### Direct messages
 
-You have one conversation with the bot in your direct message. Druks drops a
+You have one conversation with the Bot in your direct message, and one with
+each agent that you tag by name there. Druks drops a
 repeated event by its event ID. The agent writes Markdown, and Druks
 posts each reply in the direct message, in pieces of at most 12,000 characters.
 Druks ignores the bot's own messages, other bots' direct messages, edits,
@@ -550,15 +641,41 @@ its own. The agent sends no files back.
 
 ### Rooms
 
-Invite the bot to a channel or a group. Tag it in a message, and your own agent
+Invite the bot to a channel or a group. Tag it in a message, and the Bot
 answers in that message's thread. A tag inside a thread answers in that thread.
-Each person who tags the bot gets their own conversation for the thread, so two
-people can talk to their own agents in one thread. For 24 hours after the last
-message in your conversation there, your untagged replies in the thread reach
-your agent too. Other people must tag it, and a top-level message with no tag
-reaches nobody. When you tag the bot before you connect Slack, it answers in the
-thread that your account is not connected, and sends you the link in a direct
-message.
+Each person who tags the bot gets their own conversation for the thread. For 24
+hours after the last message in your conversation there, your untagged replies
+in the thread reach that conversation too. Other people must tag it, and a
+top-level message with no tag reaches nobody. When you tag the bot before you
+connect Slack, it answers in the thread that your account is not connected, and
+sends you the link in a direct message.
+
+To ask an agent, write its name right after the tag:
+`@Druks Security engineer check this PR`. Case does not matter, and the longest
+name wins, so "Security engineer" beats "Security". A name before the tag does
+not count. A comma or a colon after the tag is fine. The agent answers in your
+own conversation with it for that thread, so one thread can hold your
+conversations with several agents. A tag that names no agent reaches the
+conversation you last wrote in there, or the Bot if you have none. Your untagged
+replies reach the conversation you last wrote in, under the 24-hour rule above
+and the tag rule below. Name an agent you cannot talk to, and the bot says why
+in the thread and drops the message. The same tag works in a direct message,
+where a name without the tag reaches the Bot.
+
+An admin can give a public agent one Slack channel, under **Slack channel**
+when they edit the agent. The bot must be in the channel. In that channel, a tag
+that names no agent reaches that agent. This does not apply when you already
+have a conversation in the thread, with an agent or with the Bot. A tag that
+names another agent still reaches that agent, and a top-level message without
+the tag still reaches nobody. A channel has one agent at most. Choose
+**No channel** to return the channel to normal chat.
+
+An agent's replies in Slack show the agent's name. To give an agent a picture,
+paste a public image link under **Picture URL** when you edit the agent. Slack
+loads the image from that link. The Bot's replies, questions with buttons, and
+the bot's own notes, such as the link to connect Slack, keep the app's name and
+picture. The app needs the `chat:write.customize` scope: see
+[Slack](configuration.md#slack).
 
 Another app's bot or a Slack workflow can tag the bot in a room too, after an
 admin accepts it. Druks calls each of them an automation. The first time an

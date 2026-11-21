@@ -26,6 +26,8 @@ from .enums import ConversationSource, MessageRole, MessageState
 from .exceptions import ReminderError
 
 if TYPE_CHECKING:
+    from druks.agents.models import Agent
+
     from .channels.base import Channel
 
 
@@ -98,8 +100,15 @@ class Conversation(Base, Uuid7Pk):
             "account_id",
             "user_id",
             "thread_id",
+            "agent_id",
             unique=True,
             postgresql_where=text("connection_id IS NOT NULL"),
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index(
+            "chat_conversations_agent_idx",
+            "agent_id",
+            postgresql_where=text("agent_id IS NOT NULL"),
         ),
     )
 
@@ -123,6 +132,9 @@ class Conversation(Base, Uuid7Pk):
     # The person asked that only their tagged messages in the thread reach the agent.
     is_tag_required: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     session_file: Mapped[File | None] = FileField()
+    # The saved agent that answers instead of the Bot.
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    agent: Mapped["Agent | None"] = relationship(lazy="joined")
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     messages: Mapped[list[Message]] = relationship(
         order_by=(Message.created_at, Message.id), viewonly=True
@@ -132,6 +144,12 @@ class Conversation(Base, Uuid7Pk):
     def channel(self) -> "type[Channel] | None":
         """The channel that the conversation arrives through. A web conversation has none."""
         return channels.get(self.source)
+
+    @property
+    def sandbox_scope(self) -> str:
+        """A conversation with an agent runs in the box for its person and that agent,
+        apart from their chat box."""
+        return f"agent:{self.agent_id}" if self.agent_id else "chat"
 
     @property
     def admin_account_id(self) -> str | None:
@@ -148,9 +166,11 @@ class Conversation(Base, Uuid7Pk):
         return True
 
     @classmethod
-    async def create(cls, session: AsyncSession, *, account_id: str, body: str) -> "Conversation":
+    async def create(
+        cls, session: AsyncSession, *, account_id: str, body: str, agent_id: str | None = None
+    ) -> "Conversation":
         """A new conversation and its first message."""
-        conversation = cls(account_id=account_id)
+        conversation = cls(account_id=account_id, agent_id=agent_id)
         session.add(conversation)
         await session.flush()
         await conversation.create_message(session, body)
@@ -169,10 +189,11 @@ class Conversation(Base, Uuid7Pk):
         user_phone: str,
         thread_id: str,
         is_tag_required: bool = False,
+        agent_id: str | None = None,
     ) -> "Conversation":
-        """The one conversation of a person in a thread, or in a direct chat, on a
-        channel's connection, under the account the person routes to. It keeps the name
-        the person shows now."""
+        """The one conversation of a person with an agent, or with the Bot, in a thread,
+        or in a direct chat, on a channel's connection, under the account the person
+        routes to. It keeps the name the person shows now."""
         await session.execute(
             insert(cls)
             .values(
@@ -185,10 +206,11 @@ class Conversation(Base, Uuid7Pk):
                 user_phone=user_phone,
                 thread_id=thread_id,
                 is_tag_required=is_tag_required,
+                agent_id=agent_id,
                 created_at=Base.utc_now(),
             )
             .on_conflict_do_nothing(
-                index_elements=["connection_id", "account_id", "user_id", "thread_id"],
+                index_elements=["connection_id", "account_id", "user_id", "thread_id", "agent_id"],
                 index_where=text("connection_id IS NOT NULL"),
             )
         )
@@ -198,6 +220,7 @@ class Conversation(Base, Uuid7Pk):
                 cls.account_id == account_id,
                 cls.user_id == user_id,
                 cls.thread_id == thread_id,
+                cls.agent_id.is_not_distinct_from(agent_id),
             )
         )
         if user_name:
@@ -213,13 +236,28 @@ class Conversation(Base, Uuid7Pk):
         user_id: str,
         thread_id: str,
     ) -> "Conversation | None":
-        """The conversation of a person in a thread on a channel's connection."""
+        """The conversation of a person in a thread on a channel's connection that they
+        last wrote in. An agent's late reply does not make its conversation the latest,
+        and a bare tag's empty conversation comes last."""
+        # A run's report arrives in the person's role, so only what they wrote counts.
+        last_written_at = (
+            select(func.max(Message.created_at))
+            .where(
+                Message.conversation_id == cls.id,
+                Message.role == MessageRole.USER,
+                ~Message.is_internal,
+            )
+            .scalar_subquery()
+        )
         return await session.scalar(
-            select(cls).where(
+            select(cls)
+            .where(
                 cls.connection_id == connection.id,
                 cls.user_id == user_id,
                 cls.thread_id == thread_id,
             )
+            .order_by(last_written_at.desc().nulls_last(), cls.id.desc())
+            .limit(1)
         )
 
     @classmethod

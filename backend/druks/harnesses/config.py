@@ -107,9 +107,9 @@ async def check_config(
 async def get_config(session: AsyncSession, agent_name: str, account_id: str | None) -> AgentConfig:
     """Resolve an agent's shared execution settings and the supplied or default account's
     credential. A missing credential raises."""
-    from druks.apps.registry import agents, bots  # cycle: apps → agents → this module
+    from druks.apps.registry import bots, instructions  # cycle: apps → instructions → this module
 
-    agent = agents.get(agent_name) or bots.get(agent_name)
+    agent = instructions.get(agent_name) or bots.get(agent_name)
     if not agent:
         raise KeyError(f"no agent is registered as {agent_name!r}")
     settings = await InstallationSettings.get_or_create(session)
@@ -120,7 +120,7 @@ async def get_config(session: AsyncSession, agent_name: str, account_id: str | N
     timeout = await SettingsOverride.agent_timeout(
         session, agent_name, agent.timeout, settings=settings
     )
-    return await _build_config(
+    return await build_config(
         session,
         account_id,
         harness_name=harness.value,
@@ -137,7 +137,7 @@ async def get_default_config(session: AsyncSession, account_id: str | None) -> A
     """Resolve the installation's execution defaults and the supplied or default account's
     credential. A missing credential raises."""
     settings = await InstallationSettings.get_or_create(session)
-    return await _build_config(
+    return await build_config(
         session,
         account_id,
         harness_name=settings.default_harness,
@@ -150,7 +150,7 @@ async def get_default_config(session: AsyncSession, account_id: str | None) -> A
     )
 
 
-async def _build_config(
+async def build_config(
     session: AsyncSession,
     account_id: str | None,
     *,
@@ -162,6 +162,8 @@ async def _build_config(
     fast_mode: bool,
     include_apps: bool,
 ) -> AgentConfig:
+    """Resolve these execution settings and the supplied or default account's credential.
+    A missing credential raises."""
     account = await Account.get_secrets_owner(session, account_id)
     account_id = account.id if account else None
     harness_class = await check_config(session, harness_name, model, billing)

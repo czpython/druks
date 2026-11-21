@@ -12,9 +12,12 @@ from slack_sdk.errors import SlackApiError
 from druks.accounts.context import current_conversation_id
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
+from druks.agents.constants import PRIVATE_AGENT_MESSAGE
+from druks.agents.models import Agent
 from druks.api.dependencies import SessionDep
 from druks.durable.reads import list_active_runs_for_conversation
 from druks.durable.schemas import ActiveRunResponse
+from druks.exceptions import PermissionDenied
 from druks.redis import get_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.exceptions import SandboxUploadError
@@ -36,6 +39,7 @@ from .schemas import (
     ReminderResponse,
 )
 from .service import cancel_turn, deliver, publish, question_key, upload_file
+from .workflows import RunInstruction
 
 router = APIRouter()
 
@@ -65,16 +69,24 @@ async def list_conversations(
 async def create_conversation(
     session: SessionDep,
     body: Annotated[str, Body(embed=True)],
+    agent_id: Annotated[str | None, Body(alias="agentId", min_length=1)] = None,
     account: Account = Depends(current_session_account),
 ) -> Conversation:
+    """A new conversation. With an agent id, the agent answers it instead of the Bot."""
     if not body.strip():
         raise HTTPException(422, "Write a message.")
-    conversation = await Conversation.create(session, account_id=account.id, body=body)
+    if agent_id:
+        agent = await Agent.get_for_account(session, agent_id, account)
+        if not account.can_talk_to(agent):
+            raise PermissionDenied(PRIVATE_AGENT_MESSAGE)
+    conversation = await Conversation.create(
+        session, account_id=account.id, body=body, agent_id=agent_id
+    )
     await session.commit()
     await DBOS.start_workflow_async(deliver, conversation.id)
     await session.refresh(
         conversation,
-        ["messages", "message_count", "active_message_id", "last_message_at"],
+        ["messages", "message_count", "active_message_id", "last_message_at", "agent"],
     )
     return conversation
 
@@ -327,6 +339,23 @@ async def ask(
         json.dumps({"question": question, "choices": choices}),
         ex=SANDBOX_HOST_LEASE_SECONDS,
     )
+
+
+@router.post("/instructions", operation_id="run_instruction", status_code=202, tags=["agent"])
+async def run_instruction(
+    instruction: Annotated[
+        str, Body(embed=True, description="The task, in words, as the person gave it.")
+    ],
+    account: Account = Depends(current_account),
+) -> str:
+    """Start a run that does a task in a fresh box, and return its run id. As a saved
+    agent, you do the task there with your instructions, your model, and your skills. The
+    run reports the task and its answer to this chat. Use it to schedule a task that none
+    of your other tools does, or when the person asks for a task to run on its own. Do
+    other work yourself."""
+    if not current_conversation_id.get():
+        raise HTTPException(422, "Start a task from a chat. This call comes from no chat.")
+    return await RunInstruction.start(subject=None, instruction=instruction)
 
 
 @router.post(

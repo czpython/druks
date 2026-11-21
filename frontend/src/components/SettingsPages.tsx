@@ -38,7 +38,7 @@ import { SlackPane } from './SlackPane'
 import { WhatsAppNumbersPane } from './WhatsAppNumbersPane'
 import {
   AgentAccessPane,
-  AgentsPane,
+  InstructionsPane,
   AppPane,
   ConnectionsPane,
   PreferencesPane,
@@ -59,7 +59,7 @@ import {
 
 const SECTIONS = [
   { id: 'providers', label: 'Providers', group: 'AI execution' },
-  { id: 'agents', label: 'Agents', group: 'AI execution' },
+  { id: 'instructions', label: 'Instructions', group: 'AI execution' },
   { id: 'connections', label: 'Connections', group: 'Tools & access' },
   { id: 'mcp', label: 'MCP servers', group: 'Tools & access' },
   { id: 'skills', label: 'Skills', group: 'Tools & access' },
@@ -112,7 +112,7 @@ export function SettingsPages({
   const [location, navigate] = useLocation()
   const isAdmin = account.role === 'admin'
   const sections = SECTIONS.filter((entry) =>
-    isAdmin || !['agents', 'skills', 'teams'].includes(entry.id),
+    isAdmin || !['instructions', 'skills', 'teams'].includes(entry.id),
   )
   const connectionTabs = CONNECTION_TABS.filter((tab) => isAdmin || tab.id !== 'browser')
   const searchParams = new URLSearchParams(useSearch())
@@ -140,7 +140,7 @@ export function SettingsPages({
     enabled: Boolean(appName && isAdmin),
   })
   const harnessesQuery = useQuery({ queryKey: ['harnesses'], queryFn: api.harnesses })
-  const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
+  const instructionsQuery = useQuery({ queryKey: ['instructions'], queryFn: api.instructions })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const providersQuery = useQuery({ queryKey: ['providers'], queryFn: api.providers })
   const subscriptionsQuery = useQuery({
@@ -157,7 +157,7 @@ export function SettingsPages({
     subscriptionsQuery,
     keysQuery,
     catalogsQuery,
-    ...(!appName ? [agentsQuery, accountsQuery] : []),
+    ...(!appName ? [instructionsQuery, accountsQuery] : []),
   ]
   const executionReady = executionQueries.every((query) => query.isSuccess)
   const executionFailed = executionQueries.some((query) => query.isError)
@@ -212,7 +212,7 @@ export function SettingsPages({
   const dirtyPages = [
     ...(Object.keys(personalChanges).length > 0 ? ['personal'] : []),
     ...(defaults && savedDefaults && JSON.stringify(defaults) !== JSON.stringify(savedDefaults)
-      ? ['agents']
+      ? ['instructions']
       : []),
     ...Object.entries(appEdits)
       .filter(
@@ -229,18 +229,18 @@ export function SettingsPages({
   ]
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
-  const hasAgents = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
+  const hasInstructions = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
   // Only a public Bot takes calls.
   const channels = (appsQuery.data?.channels ?? []).filter(
     (channel) => channel !== 'call' || app?.botAccess === 'public',
   )
   const hasChannels = Boolean(app?.bot && channels.length)
-  const appTab = ['agents', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
+  const appTab = ['instructions', 'bots', 'channels'].find((tab) => location.endsWith(`/${tab}`)) ?? 'options'
   const validAppPage =
     !appName ||
     (isAdmin &&
       (location === `/apps/${appName}/settings` ||
-        (hasAgents && location === `/apps/${appName}/settings/agents`) ||
+        (hasInstructions && location === `/apps/${appName}/settings/instructions`) ||
         Boolean(app?.bot && location === `/apps/${appName}/settings/bots`) ||
         (hasChannels && location === `/apps/${appName}/settings/channels`)))
   const hasOptions = Boolean(
@@ -248,15 +248,15 @@ export function SettingsPages({
   )
   let paneSection = appTab
   if (!hasOptions && appTab === 'options') {
-    if (hasAgents) paneSection = 'agents'
+    if (hasInstructions) paneSection = 'instructions'
     else if (app?.bot) paneSection = 'bots'
   }
-  const executionPage = isAdmin && (section === 'agents' || Boolean(appName && ['agents', 'bots'].includes(paneSection)))
+  const executionPage = isAdmin && (section === 'instructions' || Boolean(appName && ['instructions', 'bots'].includes(paneSection)))
   const Content = appName ? 'section' : 'main'
   const title =
     sections.find((entry) => entry.id === section)?.label ??
     (app && validAppPage ? appLabel(app.name) : 'Settings')
-  const formPage = (isAdmin && section === 'agents') || section === 'personal' || Boolean(app && validAppPage)
+  const formPage = (isAdmin && section === 'instructions') || section === 'personal' || Boolean(app && validAppPage)
   const executionChanged =
     defaults &&
     savedDefaults &&
@@ -315,7 +315,7 @@ export function SettingsPages({
       setPersonalEdits({})
       previewTheme(null)
     }
-    else if (page === 'agents') setDefaults(null)
+    else if (page === 'instructions') setDefaults(null)
     else
       setAppEdits((current) => {
         const next = { ...current }
@@ -356,7 +356,7 @@ export function SettingsPages({
         if (page === 'personal') {
           const saved = await api.updatePersonalSettings(personalChanges)
           queryClient.setQueryData(['personalSettings'], saved)
-        } else if (page === 'agents' && defaults && savedDefaults) {
+        } else if (page === 'instructions' && defaults && savedDefaults) {
           if (executionInvalid)
             throw new Error('Choose a model with a connected credential before you save.')
           const body: UpdateSettingsRequest = {}
@@ -366,7 +366,7 @@ export function SettingsPages({
           }
           const saved = await api.updateSettings(body)
           queryClient.setQueryData(['settings'], saved)
-          await queryClient.invalidateQueries({ queryKey: ['agents'] })
+          await queryClient.invalidateQueries({ queryKey: ['instructions'] })
           await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
         } else {
           const owner = apps.find((entry) => page === `apps/${entry.name}`)!
@@ -409,7 +409,7 @@ export function SettingsPages({
           await queryClient.invalidateQueries({ queryKey: ['appSettings'] })
           // A choices source can read other saved settings. Save does not wait for the new choices.
           void queryClient.invalidateQueries({ queryKey: ['appSettingChoices'] })
-          await queryClient.invalidateQueries({ queryKey: ['agents'] })
+          await queryClient.invalidateQueries({ queryKey: ['instructions'] })
         }
         discard(page)
       }
@@ -481,8 +481,8 @@ export function SettingsPages({
     }),
     ...entry.agents.flatMap((agent) => [SETTINGS_FIELDS.harness, SETTINGS_FIELDS.model, SETTINGS_FIELDS.billing, SETTINGS_FIELDS.effort, SETTINGS_FIELDS.timeout].map((field) => ({
       label: `${field.label} · ${agent.label}`, owner: appLabel(entry.name), kind: 'Field',
-      terms: `agent override inheritance ${agent.description}`,
-      path: `/apps/${entry.name}/settings/${agent.name === entry.bot ? 'bots' : 'agents'}?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
+      terms: `instruction bot override inheritance ${agent.description}`,
+      path: `/apps/${entry.name}/settings/${agent.name === entry.bot ? 'bots' : 'instructions'}?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
     }))),
   ]) : []).filter((entry) => `${entry.label} ${entry.owner} ${entry.terms}`.toLowerCase().includes(search.trim().toLowerCase()))
 
@@ -507,7 +507,7 @@ export function SettingsPages({
           event.key === 'Enter' &&
           dirty &&
           !saving &&
-          !(section === 'agents' && executionInvalid) &&
+          !(section === 'instructions' && executionInvalid) &&
           !confirmation.current?.open
         ) {
           event.preventDefault()
@@ -615,7 +615,7 @@ export function SettingsPages({
           {appName && app && validAppPage && (
             <>
               <p className="app-settings-description">{app.description}</p>
-              {(app.bot || (hasOptions && hasAgents)) && (
+              {(app.bot || (hasOptions && hasInstructions)) && (
                 <nav className="settings-tabs" aria-label="App settings sections">
                   {hasOptions && (
                     <Link
@@ -625,12 +625,12 @@ export function SettingsPages({
                       Options
                     </Link>
                   )}
-                  {hasAgents && (
+                  {hasInstructions && (
                     <Link
-                      href={`/apps/${app.name}/settings/agents`}
-                      aria-current={paneSection === 'agents' ? 'page' : undefined}
+                      href={`/apps/${app.name}/settings/instructions`}
+                      aria-current={paneSection === 'instructions' ? 'page' : undefined}
                     >
-                      Agents
+                      Instructions
                     </Link>
                   )}
                   {app.bot && (
@@ -689,7 +689,7 @@ export function SettingsPages({
           {executionPage && !executionReady &&
             (executionFailed ? (
               <p role="alert" className="settings-error">
-                Could not load agent configuration.{' '}
+                Could not load execution settings.{' '}
                 <button
                   onClick={() => {
                     for (const query of executionQueries) if (query.isError) void query.refetch()
@@ -699,7 +699,7 @@ export function SettingsPages({
                 </button>
               </p>
             ) : (
-              <p role="status">Loading agent configuration…</p>
+              <p role="status">Loading execution settings…</p>
             ))}
           {(settingsQuery.isError || appsQuery.isError) &&
             !executionPage &&
@@ -738,12 +738,12 @@ export function SettingsPages({
                   busy={saving}
                 />
               )}
-              {isAdmin && page === 'agents' && executionReady && effectiveDefaults && (
-                <AgentsPane
+              {isAdmin && page === 'instructions' && executionReady && effectiveDefaults && (
+                <InstructionsPane
                   defaults={effectiveDefaults}
                   onDefaults={setDefaults}
                   accounts={accountsQuery.data ?? []}
-                  resolved={agentsQuery.data ?? { apps: [] }}
+                  resolved={instructionsQuery.data ?? { apps: [] }}
                   harnessByName={harnessByName}
                   harnessColor={harnessColor}
                   catalog={catalog}
@@ -897,9 +897,9 @@ export function SettingsPages({
                       onAddProvider={() => navigate('/settings/providers')}
                     />
                     <aside className="app-settings-owner">
-                      <p>Changes apply to {appLabel(entry.name)}. Unset agent fields inherit the shared defaults.</p>
-                      <Link href="/settings/agents">
-                        Shared agents <ArrowUpRight size={15} aria-hidden="true" />
+                      <p>Changes apply to {appLabel(entry.name)}. Unset fields inherit the shared defaults.</p>
+                      <Link href="/settings/instructions">
+                        Shared defaults <ArrowUpRight size={15} aria-hidden="true" />
                       </Link>
                     </aside>
                   </div>
@@ -929,7 +929,7 @@ export function SettingsPages({
               disabled={
                 saving ||
                 !dirty ||
-                (section === 'agents' && executionInvalid) ||
+                (section === 'instructions' && executionInvalid) ||
                 (section === 'personal'
                   ? !personalQuery.isSuccess
                   : settingsQuery.isPending || appsQuery.isPending)

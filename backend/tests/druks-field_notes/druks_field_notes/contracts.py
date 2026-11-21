@@ -1,7 +1,7 @@
-from druks.agents import AgentOutput
+from druks.instructions import InstructionOutput
 
 
-class GistOutput(AgentOutput):
+class GistOutput(InstructionOutput):
     # What the summarizer agent returns: the note it read, in one line.
     gist: str
 

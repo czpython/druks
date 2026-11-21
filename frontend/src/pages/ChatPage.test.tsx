@@ -6,6 +6,7 @@ import { Route, Router } from 'wouter'
 
 import { chatApi } from '../chat/api'
 import { api } from '../api/client'
+import type { Account, Agent } from '../api/types'
 import type { Conversation, ConversationAction, Message } from '../chat/state'
 import { UserPreferencesProvider } from '../lib/preferences'
 import { ChatPage } from './ChatPage'
@@ -27,14 +28,19 @@ const message: Message = { id: '10', role: 'user', body: 'Check the active runs'
 const conversation: Conversation = {
   id: '01995a3c-0000-7000-8000-000000000001', title: message.body, source: 'web', userId: null, userName: '', createdAt: message.createdAt,
   messageCount: 1, activeMessageId: '10', messages: [message],
-  isPinned: false, lastMessageAt: message.createdAt,
+  isPinned: false, lastMessageAt: message.createdAt, agentId: null, agentName: null,
+}
+const admin: Account = { id: 'admin', username: 'admin@example.com', isDefault: true, role: 'admin' }
+const reviewer: Agent = {
+  id: 'agent-1', name: 'Reviewer', description: 'Reviews pull requests', instructions: 'Be brief.',
+  skills: [], harness: 'claude', model: 'claude-opus', isPrivate: true, ownerId: 'admin', channelId: null, pictureUrl: null,
 }
 
 function mount(path = `/chat/${conversation.id}`, timezone?: string) {
   window.history.replaceState(null, '', path)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const page = <Router>
-    <Route path="/chat/:id?">{(params) => <ChatPage id={params.id} />}</Route>
+    <Route path="/chat/:id?">{(params) => <ChatPage id={params.id} account={admin} />}</Route>
   </Router>
   if (timezone) vi.spyOn(api, 'getPersonalSettings').mockResolvedValue({ timezone, theme: 'system', notificationChannelId: null, isTagRequired: false })
   render(<StrictMode><QueryClientProvider client={client}>
@@ -63,6 +69,7 @@ beforeEach(() => {
   vi.mocked(chatApi.stop).mockResolvedValue(undefined)
   vi.mocked(chatApi.setPinned).mockImplementation(async (_id, isPinned) => ({ ...conversation, isPinned }))
   vi.spyOn(api, 'listApps').mockResolvedValue([])
+  vi.spyOn(api, 'agents').mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -267,13 +274,46 @@ describe('Chat page', () => {
     mount('/chat/new')
     expect(chatApi.create).not.toHaveBeenCalled()
     expect(screen.queryByText('No messages yet')).toBeNull()
+    await waitFor(() => expect(api.agents).toHaveResolved())
+    await screen.findByText('0 installed apps')
+    expect(screen.queryByRole('combobox', { name: 'Talk to' })).toBeNull()
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: message.body } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await waitFor(() => expect(chatApi.create).toHaveBeenCalledExactlyOnceWith(message.body))
+    await waitFor(() => expect(chatApi.create).toHaveBeenCalledExactlyOnceWith(message.body, undefined))
     await connected()
     expect(window.location.pathname).toBe(`/chat/${conversation.id}`)
     expect(screen.getByRole('heading', { name: message.body })).toBeTruthy()
     expect(screen.queryByText('Private conversation')).toBeNull()
+  })
+
+  it('starts a conversation with an agent the person can talk to', async () => {
+    vi.mocked(chatApi.list).mockResolvedValue([])
+    vi.spyOn(api, 'agents').mockResolvedValue([
+      reviewer,
+      { ...reviewer, id: 'agent-2', name: 'Writer', isPrivate: false, ownerId: 'member' },
+      { ...reviewer, id: 'agent-3', name: 'Diary', ownerId: 'member' },
+    ])
+    mount('/chat/new')
+    const picker = await screen.findByRole('combobox', { name: 'Talk to' })
+    expect(within(picker).getAllByRole('option').map((option) => option.textContent)).toEqual(['Druks', 'Reviewer', 'Writer'])
+    fireEvent.change(picker, { target: { value: reviewer.id } })
+    expect(screen.getByText(reviewer.description)).toBeTruthy()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: message.body } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(chatApi.create).toHaveBeenCalledExactlyOnceWith(message.body, reviewer.id))
+  })
+
+  it('names the agent of a conversation in the list and the header', async () => {
+    const withAgent = { ...conversation, activeMessageId: null, agentId: reviewer.id, agentName: reviewer.name }
+    const replying = { ...withAgent, id: '01995a3c-0000-7000-8000-000000000002', title: 'Review the gate', activeMessageId: '20' }
+    vi.mocked(chatApi.list).mockResolvedValue([withAgent, replying])
+    mount()
+    const socket = await connected()
+    socket.receive({ type: 'snapshot', ...withAgent })
+    const row = await screen.findByRole('link', { name: /Check the active runs/ })
+    expect(row.textContent).toContain('1 message / Reviewer')
+    expect((await screen.findByRole('link', { name: /Review the gate/ })).textContent).toContain('Reviewer is replying')
+    expect(within(screen.getByRole('region', { name: 'Conversation' })).getByText(/1 message/).textContent).toContain('/ Reviewer')
   })
 
   it('saves another message while the agent replies and keeps Send beside Stop', async () => {

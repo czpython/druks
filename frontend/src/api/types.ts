@@ -668,6 +668,35 @@ export interface TeamInput {
   apps: string[]
 }
 
+export interface AgentInput {
+  name: string
+  description: string
+  instructions: string
+  skills: string[]
+  harness: string
+  model: string
+  isPrivate: boolean
+  ownerId: string
+  channelId: string | null
+  pictureUrl: string | null
+}
+
+export interface Agent extends AgentInput {
+  id: string
+}
+
+// A schedule set in one of the agent's conversations; lastRun is its newest due time.
+export interface AgentSchedule {
+  id: string
+  accountId: string
+  conversationId: string
+  tool: string
+  arguments: Record<string, unknown>
+  cron: string
+  nextRunAt: string
+  lastRun: ScheduledRun | null
+}
+
 /** What /api/auth/me answers: how this deployment authenticates, who the
  * request resolved to (null in the none/zero setup state), and whether that
  * identity still needs its first provider credential. */
@@ -884,13 +913,13 @@ export interface AgentSetting {
   timeoutSource: TimeoutSource
 }
 
-export interface AgentsApp {
+export interface InstructionsApp {
   name: string
   agents: AgentSetting[]
 }
 
-export interface AgentsResponse {
-  apps: AgentsApp[]
+export interface InstructionsResponse {
+  apps: InstructionsApp[]
 }
 
 

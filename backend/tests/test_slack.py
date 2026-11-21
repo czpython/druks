@@ -10,6 +10,7 @@ import httpx
 import pytest
 from conftest import bind_ambient_session, install_service
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.agents.models import Agent
 from druks.api.dependencies import request_session
 from druks.chat import service
 from druks.chat.channels.slack.channel import SlackChannel
@@ -57,6 +58,27 @@ async def card(druks_db):
             "bot_user_id": BOT,
         },
         secrets={"client_secret": "cs", "signing_secret": "ss"},
+    )
+    await druks_db.commit()
+    return row
+
+
+@pytest.fixture
+async def card_with_names(druks_db):
+    """The install after the workspace approved the app's custom names."""
+    bind_ambient_session(druks_db)
+    row = await install_service(
+        "slack",
+        access_token="xoxb-1",
+        identity={
+            "client_id": "c1",
+            "team": "Acme",
+            "team_id": "T1",
+            "bot_name": "druks",
+            "bot_user_id": BOT,
+        },
+        secrets={"client_secret": "cs", "signing_secret": "ss"},
+        scopes=("chat:write", "chat:write.customize"),
     )
     await druks_db.commit()
     return row
@@ -246,6 +268,62 @@ async def test_a_reply_posts_markdown_in_pieces_and_records_its_slack_id(card, d
     assert reply.source_id == "D1:1.0"
 
 
+async def reply_in_slack(session, card, account, agent):
+    conversation = await Conversation.get_or_create_for_user(
+        session,
+        card,
+        account.id,
+        source=ConversationSource.SLACK,
+        user_id=ANA,
+        user_name="",
+        user_phone="",
+        thread_id="C1:1.0",
+        agent_id=agent.id if agent else None,
+    )
+    reply = await conversation.create_message(session, "Done", role=MessageRole.ASSISTANT)
+    await SlackChannel.send_reply(session, conversation, reply)
+
+
+async def test_an_agents_reply_shows_its_name_and_picture_and_the_bots_shows_neither(
+    card_with_names, druks_db, slack
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    agent = await create_agent(druks_db, ana, "Security engineer")
+    await agent.replace(
+        druks_db,
+        editor=ana,
+        owner_id=ana.id,
+        name=agent.name,
+        description=agent.description,
+        instructions=agent.instructions,
+        skills=agent.skills,
+        harness=agent.harness,
+        model=agent.model,
+        is_private=agent.is_private,
+        channel_id=None,
+        picture_url="https://example.com/security.png",
+    )
+
+    await reply_in_slack(druks_db, card_with_names, ana, agent)
+    await reply_in_slack(druks_db, card_with_names, ana, None)
+
+    assert [(sent.get("username"), sent.get("icon_url")) for _, sent in slack] == [
+        ("Security engineer", "https://example.com/security.png"),
+        (None, None),
+    ]
+
+
+async def test_an_agents_reply_comes_from_the_app_until_the_workspace_approves_names(
+    card, druks_db, slack
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    agent = await create_agent(druks_db, ana, "Security engineer")
+
+    await reply_in_slack(druks_db, card, ana, agent)
+
+    assert [("username" in sent, "icon_url" in sent) for _, sent in slack] == [(False, False)]
+
+
 async def test_delivery_reacts_with_eyes_to_each_message_from_slack(
     card, druks_db, monkeypatch, caplog
 ):
@@ -375,8 +453,8 @@ def test_the_manifest_sends_button_clicks_to_the_interactivity_webhook():
     assert match_webhook(path)[0] is SlackInteractivity
 
 
-def room_event(user=ANA, text=f"<@{BOT}> read my runs", ts="10.0", **event):
-    return message_event(user, text, ts, channel="C1", channel_type="channel", **event)
+def room_event(user=ANA, text=f"<@{BOT}> read my runs", ts="10.0", channel="C1", **event):
+    return message_event(user, text, ts, channel=channel, channel_type="channel", **event)
 
 
 class Answer(dict):
@@ -470,6 +548,221 @@ async def test_only_a_linked_persons_untagged_reply_in_a_fresh_thread_reaches_th
 
     await druks_db.refresh(conversation, ["messages"])
     assert len(conversation.messages) == 2
+
+
+async def create_agent(session, owner, name, *, is_private=False):
+    return await Agent.create(
+        session,
+        owner=owner,
+        name=name,
+        description="",
+        instructions="",
+        skills=[],
+        harness="claude",
+        model="anthropic/claude-opus-4-7",
+        is_private=is_private,
+    )
+
+
+async def bind_channel(session, agent, channel_id):
+    """Give the agent the channel as its owner, an admin, does on the agent's page."""
+    await agent.replace(
+        session,
+        editor=await Account.get(session, id=agent.owner_id),
+        owner_id=agent.owner_id,
+        name=agent.name,
+        description=agent.description,
+        instructions=agent.instructions,
+        skills=agent.skills,
+        harness=agent.harness,
+        model=agent.model,
+        is_private=agent.is_private,
+        channel_id=channel_id,
+        picture_url=agent.picture_url,
+    )
+    await session.commit()
+
+
+async def test_a_tag_reaches_the_agent_whose_longest_name_follows_it(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    await create_agent(druks_db, ana, "Security")
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    inci = await create_agent(druks_db, ana, "İnci")
+    await druks_db.commit()
+
+    await receive(room_event(text=f"hey <@{BOT}> security engineer check this PR"))
+    await receive(room_event(text=f"Security engineer <@{BOT}> check this PR", ts="20.0"))
+    await receive(room_event(text=f"<@{BOT}> securityscan please", ts="30.0"))
+    await receive(room_event(text=f"<@{BOT}> İnci check this PR", ts="40.0"))
+    await receive(room_event(text=f"<@{BOT}>, Security engineer check this PR", ts="50.0"))
+
+    conversations = await Conversation.list_for_connection(druks_db, card.id)
+    assert sorted((chat.thread_id, chat.agent_id or "") for chat in conversations) == [
+        ("C1:10.0", engineer.id),
+        ("C1:20.0", ""),
+        ("C1:30.0", ""),
+        ("C1:40.0", inci.id),
+        ("C1:50.0", engineer.id),
+    ]
+
+
+async def test_a_direct_message_reaches_an_agent_only_when_it_tags_the_bot(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    await druks_db.commit()
+
+    await receive(message_event(text="Security engineer check this PR"))
+    await receive(message_event(text=f"<@{BOT}> Security engineer check this PR", ts="2.0"))
+
+    conversations = await Conversation.list_for_connection(druks_db, card.id)
+    assert sorted(chat.agent_id or "" for chat in conversations) == ["", engineer.id]
+
+
+async def test_a_reply_in_an_agents_thread_reaches_that_agent_until_a_tag_names_another(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    ben = await Account.get_or_create(druks_db, "ben@example.com")
+    await link_person(druks_db, ana)
+    await link_person(druks_db, ben, user_id="U200")
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    manager = await create_agent(druks_db, ana, "Release manager")
+    await druks_db.commit()
+
+    await receive(room_event(text=f"<@{BOT}> Security engineer check this PR"))
+    await receive(room_event(text="and the tests?", ts="11.0", thread_ts="10.0"))
+    await receive(room_event(user="U200", text=f"<@{BOT}> me too", ts="12.0", thread_ts="10.0"))
+    await receive(
+        room_event(text=f"<@{BOT}> Release manager can it ship?", ts="13.0", thread_ts="10.0")
+    )
+    await receive(room_event(text="today?", ts="14.0", thread_ts="10.0"))
+
+    conversations = await Conversation.list_for_connection(druks_db, card.id)
+    bodies = {}
+    for chat in conversations:
+        await druks_db.refresh(chat, ["messages"])
+        bodies[(chat.user_id, chat.agent_id)] = [message.body for message in chat.messages]
+    assert bodies == {
+        (ANA, engineer.id): ["Security engineer check this PR", "and the tests?"],
+        ("U200", None): ["me too"],
+        (ANA, manager.id): ["Release manager can it ship?", "today?"],
+    }
+
+
+async def test_a_tag_naming_no_agent_reaches_the_agent_the_person_last_wrote_to(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    manager = await create_agent(druks_db, ana, "Release manager")
+    await druks_db.commit()
+    await receive(room_event(text=f"<@{BOT}> Security engineer check this PR"))
+    await receive(
+        room_event(text=f"<@{BOT}> Release manager can it ship?", ts="11.0", thread_ts="10.0")
+    )
+    [checking] = [
+        chat
+        for chat in await Conversation.list_for_connection(druks_db, card.id)
+        if chat.agent_id == engineer.id
+    ]
+    late_reply = await checking.create_message(druks_db, "Looks safe.", role=MessageRole.ASSISTANT)
+    late_reply.created_at = Base.utc_now() + timedelta(minutes=5)
+    report = await checking.create_message(druks_db, "Run r1 finished.", is_internal=True)
+    report.created_at = Base.utc_now() + timedelta(minutes=5)
+    await druks_db.commit()
+
+    await receive(room_event(text=f"<@{BOT}> and today?", ts="12.0", thread_ts="10.0"))
+
+    shipping = await Conversation.get_for_user(druks_db, card, user_id=ANA, thread_id="C1:10.0")
+    await druks_db.refresh(shipping, ["messages"])
+    assert shipping.agent_id == manager.id
+    assert [message.body for message in shipping.messages] == [
+        "Release manager can it ship?",
+        "and today?",
+    ]
+
+
+async def test_a_bare_tag_does_not_hold_the_persons_later_tags_in_normal_chat(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    await druks_db.commit()
+    await receive(room_event(text=f"<@{BOT}>"))
+    await receive(
+        room_event(text=f"<@{BOT}> Security engineer check this PR", ts="11.0", thread_ts="10.0")
+    )
+
+    await receive(room_event(text=f"<@{BOT}> and the tests?", ts="12.0", thread_ts="10.0"))
+
+    checking = await Conversation.get_for_user(druks_db, card, user_id=ANA, thread_id="C1:10.0")
+    await druks_db.refresh(checking, ["messages"])
+    assert checking.agent_id == engineer.id
+    assert [message.body for message in checking.messages] == [
+        "Security engineer check this PR",
+        "and the tests?",
+    ]
+
+
+async def test_a_tag_naming_no_agent_in_a_channel_reaches_the_channels_agent(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    writer = await create_agent(druks_db, ana, "Writer")
+    await bind_channel(druks_db, engineer, "C1")
+
+    await receive(room_event(text=f"<@{BOT}> check this PR"))
+    await receive(room_event(text=f"<@{BOT}> Writer draft the notes", ts="20.0"))
+    await receive(room_event(text=f"<@{BOT}> make it shorter", ts="21.0", thread_ts="20.0"))
+    await receive(room_event(text=f"<@{BOT}> check this PR", ts="30.0", channel="C2"))
+
+    conversations = await Conversation.list_for_connection(druks_db, card.id)
+    assert sorted((chat.thread_id, chat.agent_id or "") for chat in conversations) == [
+        ("C1:10.0", engineer.id),
+        ("C1:20.0", writer.id),
+        ("C2:30.0", ""),
+    ]
+
+
+async def test_a_channel_without_its_agent_returns_to_normal_chat(card, druks_db, slack, delivery):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    await link_person(druks_db, ana)
+    engineer = await create_agent(druks_db, ana, "Security engineer")
+    await bind_channel(druks_db, engineer, "C1")
+    await bind_channel(druks_db, engineer, None)
+
+    await receive(room_event(text=f"<@{BOT}> check this PR"))
+
+    [conversation] = await Conversation.list_for_connection(druks_db, card.id)
+    assert not conversation.agent_id
+
+
+async def test_a_tag_naming_someone_elses_private_agent_is_refused_in_the_thread(
+    card, druks_db, slack, delivery
+):
+    ana = await Account.get_or_create(druks_db, "ana@example.com")
+    ben = await Account.get_or_create(druks_db, "ben@example.com")
+    await link_person(druks_db, ben, user_id="U200")
+    await create_agent(druks_db, ana, "Security engineer", is_private=True)
+    await druks_db.commit()
+
+    await receive(room_event(user="U200", text=f"<@{BOT}> Security engineer check this PR"))
+
+    assert not await Conversation.list_for_connection(druks_db, card.id)
+    delivery.assert_not_awaited()
+    [(method, sent)] = slack
+    assert (method, sent["channel"], sent["thread_ts"]) == ("chat.postMessage", "C1", "10.0")
+    assert "Only the agent's owner can talk to a private agent." in json.dumps(sent)
 
 
 async def test_an_unlinked_person_who_tags_the_bot_gets_the_link_by_direct_message(

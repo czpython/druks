@@ -1,1449 +1,385 @@
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+from unittest.mock import AsyncMock
 
-import pytest
-from conftest import connect_service, installation_key, make_agent_result
-from druks import agents
+from conftest import IDENTITY_HEADER, header_client, seed_call, seed_note_run
+from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
-from druks.browser import BrowserClient, BrowserSession
-from druks.chat.service import report_quota_resume, report_quota_wait
-from druks.db import db_session
-from druks.durable import AgentCall, WorkflowError
-from druks.durable.engine import _step_engine
-from druks.exceptions import ObjectNotFound
-from druks.files import File
-from druks.harnesses.claude import ClaudeHarness
-from druks.harnesses.config import get_config
-from druks.sandbox.client import sandbox_client
-from druks.sandbox.datastructures import McpServer
-from druks.sandbox.exceptions import SandboxDownloadError
-from druks.sandbox.host import Host
-from druks.sandbox.models import SandboxIdentity, SecretRef
-from druks.secrets.datastructures import Audience
-from druks.secrets.enums import SecretKind
-from druks.secrets.models import VaultSecret
-from druks.services import Resource, Service
-from druks.usage.models import UsageScrape
-from druks.user_settings.models import SettingsOverride
-from druks.workspaces import Workspace
-from pydantic import BaseModel, SecretStr
-from sqlalchemy import select
+from druks.chat.models import Conversation
+from druks.durable.dbos_state import workflow_status
+from druks.durable.models import Schedule
+from druks.skills.datastructures import InstalledSkill
+from druks.skills.models import Skill, SkillCollection
+from druks.teams.models import Team
+
+AGENT = {
+    "name": "Security engineer",
+    "description": "Reviews changes for security problems.",
+    "instructions": "Read the diff. Name each risk.",
+    "skills": [],
+    "harness": "claude",
+    "model": "anthropic/claude-opus-4-7",
+    "isPrivate": False,
+}
 
 
-class DummyOutput(agents.AgentOutput):
-    ok: bool
+async def test_a_member_creates_an_agent_and_owns_it(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    headers = {IDENTITY_HEADER: member.username}
+
+    with header_client(tmp_path) as client:
+        created = client.post("/api/agents", json=AGENT, headers=headers)
+        listed = client.get("/api/agents", headers=headers)
+
+    assert created.status_code == 201
+    assert created.json()["ownerId"] == member.id
+    assert listed.json() == [created.json()]
 
 
-DUMMY_AGENT = agents.Agent(
-    id="dummy",
-    prompt="dummy/agent.md",
-    contract=DummyOutput,
-)
+async def test_the_owner_gives_an_agent_a_picture(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    headers = {IDENTITY_HEADER: member.username}
+    picture = "https://example.com/security.png"
+
+    with header_client(tmp_path) as client:
+        agent = client.post("/api/agents", json=AGENT, headers=headers).json()
+        url = f"/api/agents/{agent['id']}"
+        client.put(
+            url,
+            json={**AGENT, "ownerId": member.id, "channelId": None, "pictureUrl": picture},
+            headers=headers,
+        )
+        fetched = client.get(url, headers=headers)
+
+    assert fetched.json()["pictureUrl"] == picture
 
 
-class FileOutput(agents.AgentOutput):
-    image: File
+async def test_agent_names_are_unique_in_any_case(tmp_path: Path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    headers = {IDENTITY_HEADER: admin.username}
+
+    with header_client(tmp_path) as client:
+        first = client.post("/api/agents", json=AGENT, headers=headers)
+        other = client.post("/api/agents", json={**AGENT, "name": "İnspector"}, headers=headers)
+        dotted_duplicate = client.post(
+            "/api/agents", json={**AGENT, "name": "İnspector"}, headers=headers
+        )
+        duplicate = client.post(
+            "/api/agents",
+            json={**AGENT, "name": "security engineer"},
+            headers=headers,
+        )
+        renamed = client.put(
+            f"/api/agents/{other.json()['id']}",
+            json={
+                **AGENT,
+                "name": "SECURITY ENGINEER",
+                "ownerId": admin.id,
+                "channelId": None,
+                "pictureUrl": None,
+            },
+            headers=headers,
+        )
+
+    assert first.status_code == 201
+    assert dotted_duplicate.status_code == 422
+    assert duplicate.status_code == 422
+    assert renamed.status_code == 422
 
 
-FILE_AGENT = agents.Agent(
-    id="file",
-    prompt="dummy/agent.md",
-    contract=FileOutput,
-)
+async def test_another_member_cannot_see_or_change_a_private_agent(tmp_path: Path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    other = await Account.get_or_create(druks_db, "other@example.com")
+    owner_headers = {IDENTITY_HEADER: owner.username}
+    other_headers = {IDENTITY_HEADER: other.username}
 
-# Declared outside an app class, so the session joins no registry.
-ATLAS = BrowserSession(site="atlas.example", read_only=True)
+    with header_client(tmp_path) as client:
+        private = client.post(
+            "/api/agents", json={**AGENT, "isPrivate": True}, headers=owner_headers
+        ).json()
+        public = client.post(
+            "/api/agents", json={**AGENT, "name": "Reviewer"}, headers=owner_headers
+        ).json()
+        listed_by_other = client.get("/api/agents", headers=other_headers)
+        listed_by_admin = client.get("/api/agents", headers={IDENTITY_HEADER: admin.username})
+        update = {**AGENT, "ownerId": owner.id, "channelId": None, "pictureUrl": None}
+        private_url = f"/api/agents/{private['id']}"
+        public_url = f"/api/agents/{public['id']}"
+        private_requests = [
+            client.get(private_url, headers=other_headers),
+            client.put(private_url, json=update, headers=other_headers),
+            client.delete(private_url, headers=other_headers),
+            client.get(f"{private_url}/runs", headers=other_headers),
+            client.get(f"{private_url}/schedules", headers=other_headers),
+            client.get(
+                f"{private_url}/cost",
+                params={"since": "2026-11-16T00:00:00Z"},
+                headers=other_headers,
+            ),
+        ]
+        public_requests = [
+            client.put(public_url, json={**update, "name": "Reviewer"}, headers=other_headers),
+            client.delete(public_url, headers=other_headers),
+        ]
+        deleted_by_owner = client.delete(private_url, headers=owner_headers)
 
-BROWSER_AGENT = agents.Agent(
-    id="browser_probe",
-    prompt="dummy/agent.md",
-    contract=DummyOutput,
-    browser=ATLAS,
-    browser_client=BrowserClient.PINCHTAB,
-)
-
-
-@pytest.fixture(autouse=True)
-async def _seed_run_for_record(druks_db):
-    # An agent call records an AgentCall, which FKs to its run.
-    from druks.testing import seed_run
-    from druks_field_notes.workflows import Summarize
-
-    await seed_run(druks_db, kind=Summarize.kind, run_id="wf-9")
-
-
-@pytest.fixture(autouse=True)
-async def _connected_claude(druks_db):
-    # A run refuses to dispatch on an unconnected harness; the runtime tests
-    # here resolve to claude models, so connect it once.
-    from conftest import connect_provider
-    from druks.harnesses.providers import AnthropicProvider
-
-    await connect_provider(AnthropicProvider, {"claudeAiOauth": {"accessToken": "test-token"}})
-
-
-def _patch_runtime(monkeypatch, tmp_path, payload):
-    """Pin settings/prompt; returns a fake sandbox capturing the run_agent
-    call. The agent's model/effort/timeout resolve via the override store
-    against the test ``druks_db``."""
-
-    @asynccontextmanager
-    async def lease(self, *, host_id):
-        yield
-
-    monkeypatch.setattr("druks.sandbox.client.Client.lease", lease)
-    settings = MagicMock()
-    settings.artifacts_dir = tmp_path
-    monkeypatch.setattr(agents, "get_settings", lambda: settings)
-
-    async def _template(name, *, repo):
-        async def render_async(**_context):
-            return f"PROMPT:{name}:repo={repo}"
-
-        return SimpleNamespace(render_async=render_async)
-
-    monkeypatch.setattr(agents, "get_template", _template)
-    sandbox = Host(record=SimpleNamespace(id="host-test", ssh_username="root"))  # type: ignore[arg-type]
-    sandbox.run_agent = AsyncMock(return_value=make_agent_result(payload, agent="dummy"))
-    return sandbox
+    assert [agent["id"] for agent in listed_by_other.json()] == [public["id"]]
+    assert {agent["id"] for agent in listed_by_admin.json()} == {private["id"], public["id"]}
+    assert [response.status_code for response in private_requests] == [404] * 6
+    assert [response.status_code for response in public_requests] == [403, 403]
+    assert deleted_by_owner.status_code == 204
 
 
-async def _identities(run_id: str) -> list[SandboxIdentity]:
-    rows = await db_session().scalars(
-        select(SandboxIdentity).where(SandboxIdentity.run_id == run_id).order_by(SandboxIdentity.id)
+async def test_only_an_admin_changes_the_owner(tmp_path: Path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    other = await Account.get_or_create(druks_db, "other@example.com")
+    bot = await Account.create_for_bot(druks_db, AccountKind.BOT)
+
+    with header_client(tmp_path) as client:
+        agent = client.post(
+            "/api/agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
+        ).json()
+        url = f"/api/agents/{agent['id']}"
+        by_owner = client.put(
+            url,
+            json={**AGENT, "ownerId": other.id, "channelId": None, "pictureUrl": None},
+            headers={IDENTITY_HEADER: owner.username},
+        )
+        by_admin = client.put(
+            url,
+            json={**AGENT, "ownerId": other.id, "channelId": None, "pictureUrl": None},
+            headers={IDENTITY_HEADER: admin.username},
+        )
+        not_operators = [
+            client.put(
+                url,
+                json={**AGENT, "ownerId": owner_id, "channelId": None, "pictureUrl": None},
+                headers={IDENTITY_HEADER: admin.username},
+            )
+            for owner_id in (bot.id, "no-such-id")
+        ]
+
+    assert by_owner.status_code == 403
+    assert by_admin.status_code == 200
+    assert by_admin.json()["ownerId"] == other.id
+    assert [response.status_code for response in not_operators] == [422, 422]
+
+
+async def test_only_an_admin_gives_an_agent_a_channel_the_bot_is_in(
+    tmp_path: Path, druks_db, monkeypatch
+):
+    channels = AsyncMock(return_value=[{"id": "C1", "name": "security"}])
+    monkeypatch.setattr("druks.agents.routes.list_notification_channels", channels)
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+
+    with header_client(tmp_path) as client:
+        agent = client.post(
+            "/api/agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
+        ).json()
+        url = f"/api/agents/{agent['id']}"
+        update = {**AGENT, "ownerId": owner.id, "channelId": "C1", "pictureUrl": None}
+        by_owner = client.put(url, json=update, headers={IDENTITY_HEADER: owner.username})
+        outside = client.put(
+            url, json={**update, "channelId": "C2"}, headers={IDENTITY_HEADER: admin.username}
+        )
+        by_admin = client.put(url, json=update, headers={IDENTITY_HEADER: admin.username})
+        # The bot has left the channel since: an edit that keeps the channel still saves.
+        channels.return_value = []
+        kept_by_owner = client.put(
+            url, json={**update, "name": "Security"}, headers={IDENTITY_HEADER: owner.username}
+        )
+
+    assert by_owner.status_code == 403
+    assert outside.status_code == 422
+    assert by_admin.json()["channelId"] == "C1"
+    assert kept_by_owner.json()["channelId"] == "C1"
+
+
+async def test_a_channel_has_one_agent_and_only_a_public_one(tmp_path: Path, druks_db, monkeypatch):
+    monkeypatch.setattr(
+        "druks.agents.routes.list_notification_channels",
+        AsyncMock(return_value=[{"id": "C1", "name": "security"}]),
     )
-    return list(rows)
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    headers = {IDENTITY_HEADER: admin.username}
+
+    with header_client(tmp_path) as client:
+        first = client.post("/api/agents", json=AGENT, headers=headers).json()
+        second = client.post(
+            "/api/agents", json={**AGENT, "name": "Writer"}, headers=headers
+        ).json()
+        bound = {**AGENT, "ownerId": admin.id, "channelId": "C1", "pictureUrl": None}
+        client.put(f"/api/agents/{first['id']}", json=bound, headers=headers)
+        taken = client.put(
+            f"/api/agents/{second['id']}",
+            json={**bound, "name": "Writer"},
+            headers=headers,
+        )
+        private = client.put(
+            f"/api/agents/{first['id']}",
+            json={**bound, "isPrivate": True},
+            headers=headers,
+        )
+
+    assert taken.status_code == 422
+    assert "Security engineer" in taken.json()["detail"]
+    assert private.status_code == 422
 
 
-def _patch_ephemeral(monkeypatch, box):
-    # No warm context → the runner's VM comes from ephemeral(); yield our fake box so the
-    # base Workspace wraps it and delegates run_agent to it.
-    @asynccontextmanager
-    async def _fake(self, *, idempotency_key=None, **_kwargs):
-        yield box
-
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", _fake)
-
-
-@pytest.fixture
-async def current_run():
-    # An agent call reads its workflow from current_workflow; set it like the run engine does.
-    from druks.workflows import Workflow, current_workflow
-
-    workflow = Workflow()
-    workflow.account_id = (await Account.get_default(db_session())).id
-    workflow._workflow_id = "wf-9"
-    workflow.kind = "test"
-    token = current_workflow.set(workflow)
-    yield workflow
-    current_workflow.reset(token)
-
-
-@pytest.fixture
-def _inline_agent_steps(monkeypatch):
-    # Run agent attempts and quota lookups inline while retaining their DBOS step boundaries.
-    checkpoints = []
-
-    async def run_inline(options, function, *args):
-        checkpoints.append(options)
-        return await function(*args)
-
-    sleep = AsyncMock()
-    monkeypatch.setattr(agents.DBOS, "run_step_async", run_inline)
-    monkeypatch.setattr(agents.DBOS, "sleep_async", sleep)
-    return checkpoints, sleep
-
-
-BROWSER_SERVER = McpServer(
-    name="browser", url="https://druks.example/mcp", bearer_token_env_var="MCP_BROWSER_TOKEN"
-)
-
-
-@pytest.fixture
-async def lent_browser(druks_db, monkeypatch):
-    """The browsers the calls borrow, each lent with one stored key."""
-    key = await VaultSecret.store(
+async def test_an_agent_takes_enabled_skills_and_a_harness_that_runs_it(tmp_path: Path, druks_db):
+    admin = await Account.get_or_create(druks_db, "admin@example.com")
+    headers = {IDENTITY_HEADER: admin.username}
+    await SkillCollection.create(
         druks_db,
-        SecretKind.STATIC,
-        "mcp:browser test",
-        secrets={"value": "Bearer key"},
+        source="https://github.com/o/r",
+        name="o/r",
+        skills=[
+            InstalledSkill(name="alpha", description="one", path="/p/alpha", content_hash="a"),
+            InstalledSkill(name="beta", description="two", path="/p/beta", content_hash="b"),
+        ],
     )
-    lent = []
+    (await Skill.get(druks_db, "beta")).enabled = False
+    await druks_db.flush()
 
-    @asynccontextmanager
-    async def lend(session, client, *, account_id, call_id):
-        lent.append((session, client, account_id, call_id))
-        yield BROWSER_SERVER, SecretRef(name="mcp_browser_token", secret_id=key.id)
-
-    monkeypatch.setattr(agents.AgentBrowser, "lend", lend)
-    return lent
-
-
-def test_a_browser_agent_drives_with_the_pinchtab_client():
-    with pytest.raises(TypeError, match="needs browser_client=BrowserClient.PINCHTAB"):
-        agents.Agent(id="no_client", contract=DummyOutput, browser=ATLAS)
-    with pytest.raises(TypeError, match="needs browser_client=BrowserClient.PINCHTAB"):
-        agents.Agent(
-            id="playwright_client",
-            contract=DummyOutput,
-            browser=ATLAS,
-            browser_client=BrowserClient.PLAYWRIGHT,
+    with header_client(tmp_path) as client:
+        enabled_skill = client.post(
+            "/api/agents", json={**AGENT, "skills": ["alpha"]}, headers=headers
         )
-    with pytest.raises(TypeError, match="needs browser="):
-        agents.Agent(id="no_session", contract=DummyOutput, browser_client=BrowserClient.PINCHTAB)
-
-
-async def test_an_agent_browser_gets_its_own_box_and_the_browser_server(
-    druks_db, tmp_path, monkeypatch, current_run, lent_browser
-):
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    boxes = []
-
-    @asynccontextmanager
-    async def fake_ephemeral(self, *, idempotency_key=None, secrets=None, **_kwargs):
-        boxes.append((idempotency_key, secrets))
-        yield sandbox
-
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
-    monkeypatch.setattr(current_run, "_lease_host", AsyncMock(side_effect=AssertionError))
-    other = McpServer(name="tracker", url="https://tracker.example/mcp")
-    resolve = AsyncMock(return_value=((other,), []))
-    monkeypatch.setattr(Workspace, "get_all_mcp_servers", resolve)
-
-    assert await BROWSER_AGENT._run(workflow_id="wf-9") == DummyOutput(ok=True)
-
-    [(session, client, account_id, call_id)] = lent_browser
-    assert (session, client, account_id) == (ATLAS, BrowserClient.PINCHTAB, current_run.account_id)
-    [(key, secrets)] = boxes
-    assert key.startswith(f"wf-9:{call_id}:")
-    assert "mcp_browser_token" in secrets
-    kwargs = sandbox.run_agent.await_args.kwargs
-    assert kwargs["mcp_servers"] == (other, BROWSER_SERVER)
-
-
-async def test_a_replayed_call_starts_no_browser(monkeypatch, current_run, lent_browser):
-    async def replay(options, function):
-        return DummyOutput(ok=True)
-
-    monkeypatch.setattr(agents.DBOS, "run_step_async", replay)
-
-    assert await BROWSER_AGENT() == DummyOutput(ok=True)
-    assert lent_browser == []
-
-
-async def test_run_outside_workflow_raises():
-    # an agent call needs a workflow context; standalone agent runs aren't supported yet.
-    with pytest.raises(WorkflowError, match="inside a workflow"):
-        await DUMMY_AGENT(repo="acme/widget")
-
-
-async def test_run_refuses_an_agent_with_no_id():
-    # Built loose — never assigned to an App, never given an explicit id — so
-    # the call it would record would name nobody.
-    loose = agents.Agent(prompt="dummy/agent.md", contract=DummyOutput)
-    with pytest.raises(WorkflowError, match="runs under its own id"):
-        await loose(repo="acme/widget")
-
-
-async def test_run_refuses_unconnected_harness(druks_db, tmp_path, monkeypatch, current_run):
-    # The precondition fires where the harness is resolved — before any VM work.
-    from druks.accounts.models import Account
-    from druks.harnesses.exceptions import HarnessNotConnectedError
-
-    await (
-        await VaultSecret.lookup(
-            druks_db,
-            SecretKind.SUBSCRIPTION,
-            Audience.provider("anthropic"),
-            (await Account.get_for_username(druks_db, "op@example.com")).id,
+        disabled_skill = client.post(
+            "/api/agents",
+            json={**AGENT, "name": "Reviewer", "skills": ["beta"]},
+            headers=headers,
         )
-    ).revoke("user")
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    with pytest.raises(HarnessNotConnectedError, match="connect your Anthropic subscription"):
-        await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    sandbox.run_agent.assert_not_awaited()
-
-
-async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch, current_run):
-    # The declaration and the operator default drive what run_agent sees
-    # (model/schema/artifact dir/timeout); run() returns the validated contract.
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    result = await DUMMY_AGENT._run(workflow_id="wf-9", repo="acme/widget")
-
-    assert result == DummyOutput(ok=True)
-    harness, manifest = sandbox.run_agent.await_args.args
-    assert isinstance(harness, ClaudeHarness)
-    assert harness.model == "anthropic/claude-opus-4-7"
-    assert manifest.harness == "claude"
-    kwargs = sandbox.run_agent.await_args.kwargs
-    assert kwargs["agent"] == "dummy"
-    assert kwargs["timeout"] == 1800
-    assert kwargs["schema"] == DummyOutput.model_json_schema()
-    assert kwargs["prompt"] == "PROMPT:dummy/agent.md:repo=acme/widget"
-    assert kwargs["artifact_dir"] == tmp_path / "run-wf-9"
-    assert kwargs["include_plugins"] is True
-    assert kwargs["hooks"] == {}
-    assert "model" not in kwargs
-
-
-async def test_declared_plugin_choice_is_forwarded(druks_db, tmp_path, monkeypatch, current_run):
-    agent = agents.Agent(
-        id="plugin_probe",
-        prompt="dummy/agent.md",
-        contract=DummyOutput,
-        include_plugins=False,
-    )
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    await agent._run(workflow_id="wf-9")
-
-    assert sandbox.run_agent.await_args.kwargs["include_plugins"] is False
-
-
-async def test_an_agent_without_mcp_resolves_no_server(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    agent = agents.Agent(
-        id="sealed_probe",
-        prompt="dummy/agent.md",
-        contract=DummyOutput,
-        include_mcp=False,
-    )
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-    resolve = AsyncMock()
-    monkeypatch.setattr(Workspace, "get_all_mcp_servers", resolve)
-
-    await agent._run(workflow_id="wf-9")
-
-    resolve.assert_not_awaited()
-    assert sandbox.run_agent.await_args.kwargs["mcp_servers"] == ()
-
-
-async def test_an_agent_holds_its_declared_service_secrets(
-    druks_db, tmp_path, monkeypatch, current_run, declared_services
-):
-    class Acme(Service):
-        host = "api.acme.test"
-
-        class Settings(BaseModel):
-            api_key: SecretStr
-
-    class Spare(Service):
-        required = False
-        host = "api.spare.test"
-
-        class Settings(BaseModel):
-            api_key: SecretStr
-
-    card = await connect_service("acme", identity={}, secrets={"api_key": "key-1"})
-    agent = agents.Agent(
-        id="keyed_probe",
-        prompt="dummy/agent.md",
-        contract=DummyOutput,
-        secrets=(Acme.fields.api_key, Spare.fields.api_key),
-    )
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    await agent._run(workflow_id="wf-9")
-
-    [identity] = await _identities("wf-9")
-    refs = await db_session().scalars(
-        select(SecretRef).where(
-            SecretRef.identity_id == identity.id, SecretRef.name.like("%_api_key")
+        public_on_api_key_harness = client.post(
+            "/api/agents",
+            json={**AGENT, "name": "Reviewer", "harness": "opencode"},
+            headers=headers,
         )
-    )
-    # The optional service is not connected, so its secret stays out.
-    [ref] = list(refs)
-    assert (ref.name, ref.secret_id, ref.host) == ("acme_api_key", card.id, "api.acme.test")
-    assert await ref.secret.issue_token(tuple(ref.resources), name=ref.name) == ("key-1", None)
-
-
-async def test_an_agent_holds_a_resource_secret_from_its_workspace(
-    druks_db, tmp_path, monkeypatch, current_run, declared_services
-):
-    class Acme(Service):
-        host = "api.acme.test"
-
-        class Settings(BaseModel):
-            api_token: SecretStr
-
-        class Workers(Resource):
-            async def get_token(self) -> tuple[str, None]:
-                return f"{self.name}-token", None
-
-    async def get_secrets(cls, subject):
-        return await Acme.Workers("site").get_secrets()
-
-    card = await connect_service("acme", identity={}, secrets={"api_token": "pasted"})
-    monkeypatch.setattr(Workspace, "get_secrets", classmethod(get_secrets))
-    agent = agents.Agent(id="resource_probe", prompt="dummy/agent.md", contract=DummyOutput)
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    await agent._run(workflow_id="wf-9")
-
-    [identity] = await _identities("wf-9")
-    [ref] = await db_session().scalars(
-        select(SecretRef).where(
-            SecretRef.identity_id == identity.id, SecretRef.name == "acme_api_token"
+        public_on_harness_without_chat = client.post(
+            "/api/agents",
+            json={**AGENT, "name": "Pi", "harness": "pi"},
+            headers=headers,
         )
-    )
-    assert (ref.secret_id, ref.resources, ref.host) == (card.id, ["workers/site"], "api.acme.test")
-    assert await ref.secret.issue_token(tuple(ref.resources), name=ref.name) == ("site-token", None)
+        private_on_api_key_harness = client.post(
+            "/api/agents",
+            json={**AGENT, "name": "Tester", "harness": "opencode", "isPrivate": True},
+            headers=headers,
+        )
+        wrong_model = client.post(
+            "/api/agents",
+            json={**AGENT, "name": "Planner", "harness": "claude", "model": "openai/gpt-5.5"},
+            headers=headers,
+        )
+
+    assert enabled_skill.status_code == 201
+    assert enabled_skill.json()["skills"] == ["alpha"]
+    assert disabled_skill.status_code == 422
+    assert public_on_api_key_harness.status_code == 201
+    assert public_on_harness_without_chat.status_code == 422
+    assert private_on_api_key_harness.status_code == 422
+    assert wrong_model.status_code == 422
 
 
-async def test_runner_comes_from_workflow_workspace_factory(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    """The runner is an instance of ``workflow.workspace_class`` — a mode overrides it to
-    decide what the agent runs in (a cloned repo, tokens, MCP). The agent runs through it,
-    not a bare VM."""
-    from druks.workflows import current_workflow
+async def test_an_agent_lists_its_runs_that_a_person_can_open(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    outsider = await Account.get_or_create(druks_db, "outsider@example.com")
+    await Team.create(druks_db, name="Notes", member_ids=[owner.id], apps=["field_notes"])
+    await druks_db.flush()
 
-    _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    box = MagicMock()
-    box.id = "host-test"
-    _patch_ephemeral(monkeypatch, box)  # the workspace below runs nothing on it
+    with header_client(tmp_path) as client:
+        agent = client.post(
+            "/api/agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
+        ).json()
+        asked = await Conversation.create(
+            druks_db, account_id=owner.id, body="Summarize", agent_id=agent["id"]
+        )
+        plain = await Conversation.create(druks_db, account_id=owner.id, body="Summarize")
+        runs = []
+        for conversation, cost in ((asked, 1.0), (asked, 2.0), (plain, 4.0)):
+            run = await seed_note_run(druks_db, account_id=owner.id)
+            run.conversation_id = conversation.id
+            (await seed_call(druks_db, run, "summarize")).cost_usd = cost
+            runs.append(run)
+        runs[0].created_at = datetime.now(UTC) - timedelta(days=8)
+        await druks_db.flush()
+        url = f"/api/agents/{agent['id']}/runs"
+        week = {"since": (datetime.now(UTC) - timedelta(days=7)).isoformat()}
+        seen = client.get(url, headers={IDENTITY_HEADER: owner.username})
+        hidden = client.get(url, headers={IDENTITY_HEADER: outsider.username})
+        cost_url = f"/api/agents/{agent['id']}/cost"
+        local = client.get(
+            cost_url,
+            params={"since": "2026-11-16T00:00:00"},
+            headers={IDENTITY_HEADER: owner.username},
+        )
+        ever = {"since": "2000-01-01T00:00:00Z"}
+        cost = client.get(cost_url, params=ever, headers={IDENTITY_HEADER: owner.username})
+        week_cost = client.get(cost_url, params=week, headers={IDENTITY_HEADER: owner.username})
+        hidden_cost = client.get(
+            cost_url, params=ever, headers={IDENTITY_HEADER: outsider.username}
+        )
 
-    class ModeWorkspace(Workspace):
-        prepare = AsyncMock()
-        run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
-
-    monkeypatch.setattr(current_workflow.get(), "workspace_class", ModeWorkspace)
-
-    result = await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert result == DummyOutput(ok=True)
-    ModeWorkspace.prepare.assert_awaited_once()
-    ModeWorkspace.run_agent.assert_awaited_once()
-    assert ModeWorkspace.run_agent.await_args.kwargs["agent"] == "dummy"
-
-
-def test_get_loads_the_owning_app_before_it_reads_the_registry(monkeypatch):
-    monkeypatch.setattr(agents.agents, "_items", dict(agents.agents._items))
-    writer = agents.Agent(id="later.writer", prompt="dummy/agent.md", contract=DummyOutput)
-    del agents.agents._items[writer.id]
-    loaded = []
-
-    def resolve_app(name):
-        loaded.append(name)
-        agents.agents.register(writer)
-
-    monkeypatch.setattr(agents, "resolve_app", resolve_app)
-
-    assert agents.Agent.get("later.writer") is writer
-    assert agents.Agent.get("dummy") is DUMMY_AGENT
-    assert loaded == ["later"]
-    with pytest.raises(ObjectNotFound):
-        agents.Agent.get("later.reader")
-
-
-async def test_after_agent_hooks_answer_the_turn_from_a_box_of_their_own(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    hooked = agents.Agent(id="hooked_probe", prompt="dummy/agent.md", contract=DummyOutput)
-    seen = []
-
-    @hooked.after_agent
-    async def check(*, prompt, workspace):
-        seen.append((prompt, workspace.host_id))
-        nested = await DUMMY_AGENT()
-        return f"The check says {nested.ok}."
-
-    @hooked.after_agent
-    async def stay_quiet(*, prompt, workspace):
-        return None
-
-    @hooked.after_agent
-    async def nudge(*, prompt, workspace):
-        return "Run the tests."
-
-    warm = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    warm.record.id = "warm-host"
-    answers = []
-
-    async def run_hooked(_harness, _manifest, **kwargs):
-        answers.append(await kwargs["hooks"]["after_agent"]())
-        return make_agent_result({"ok": True}, agent="hooked_probe")
-
-    warm.run_agent = AsyncMock(side_effect=run_hooked)
-
-    @asynccontextmanager
-    async def attach(*, host_id):
-        yield warm
-
-    monkeypatch.setattr(sandbox_client, "attach", attach)
-    lease = AsyncMock(return_value="warm-host")
-    monkeypatch.setattr(current_run, "_lease_host", lease)
-    nested_box = MagicMock()
-    nested_box.id = "nested-host"
-    nested_box.run_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
-    _patch_ephemeral(monkeypatch, nested_box)
-
-    await hooked._run(workflow_id="wf-9")
-
-    assert answers == [
-        ClaudeHarness.get_after_agent_reply("The check says True.\n\nRun the tests.")
+    assert local.status_code == 422
+    assert [(run["id"], run["accountUsername"]) for run in seen.json()] == [
+        (runs[1].id, owner.username),
+        (runs[0].id, owner.username),
     ]
-    assert seen == [("PROMPT:dummy/agent.md:repo=None", "warm-host")]
-    lease.assert_awaited_once()
-    nested_box.run_agent.assert_awaited_once()
+    assert hidden.json() == []
+    assert cost.json() == {"costUsd": 3.0}
+    assert week_cost.json() == {"costUsd": 2.0}
+    assert hidden_cost.json() == {"costUsd": 0.0}
 
 
-async def test_ephemeral_acquisition_keys_idempotency_to_workflow_step(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    """Without a warm context the runtime acquires a throwaway VM, keyed for
-    idempotency to ``<workflow_id>:<step>:<identity>``."""
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    seen: list[str | None] = []
-
-    @asynccontextmanager
-    async def fake_ephemeral(self, *, idempotency_key=None, **_kwargs):
-        seen.append(idempotency_key)
-        yield sandbox
-
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
-
-    result = await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert result == DummyOutput(ok=True)
-    [identity] = await _identities("wf-9")
-    assert seen == [f"wf-9:dummy:{identity.id}"]
-
-
-@pytest.mark.parametrize("billing", ["subscription", "api_key"])
-async def test_running_call_visible_then_finished(
-    druks_db, tmp_path, monkeypatch, current_run, billing
-):
-    """The AgentCall exists RUNNING on its host while the agent runs, so the live
-    transcript has a row to stream onto, and is finished once it returns."""
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    await installation_key()
-    await SettingsOverride.set_agent_billing(druks_db, DUMMY_AGENT.id, billing)
-    during: dict[str, object] = {}
-
-    async def _run_agent(_harness, _manifest, *, call_id, **_kwargs):
-        config = await get_config(db_session(), DUMMY_AGENT.id, current_run.account_id)
-        row = await AgentCall.get(db_session(), call_id)
-        assert row.subscription_id == (config.subscription.id if config.subscription else None)
-        assert row.api_key_id == (config.api_key.id if config.api_key else None)
-        during["status"] = row.status
-        during["host"] = row.sandbox_host_id
-        return make_agent_result({"ok": True}, agent="dummy")
-
-    sandbox.run_agent = _run_agent
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert during == {"status": "running", "host": "host-test"}
-    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert call.status == "succeeded"
-    assert call.sandbox_host_id == "host-test"
-    assert call.finished_at is not None
-
-
-@pytest.mark.parametrize(("left_on", "resumed"), [("host-test", True), ("host-gone", False)])
-async def test_a_recovered_call_resumes_the_agent_its_box_still_runs(
-    druks_db, tmp_path, monkeypatch, current_run, left_on, resumed
-):
-    """A RUNNING row from a stopped process names the call. On its box the attempt
-    watches that agent under the same id; on another box it starts over and the
-    row is abandoned."""
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.resume_agent = AsyncMock(return_value=make_agent_result({"ok": True}, agent="dummy"))
-    _patch_ephemeral(monkeypatch, sandbox)
-    config = await get_config(db_session(), DUMMY_AGENT.id, current_run.account_id)
-    await AgentCall.start(
-        _step_engine(),
-        call_id="call-left",
-        run_id="wf-9",
-        model=config.model,
-        agent="dummy",
-        host_id=left_on,
-        subscription_id=config.subscription.id,
-        api_key_id=None,
+async def test_an_agent_lists_the_schedules_set_in_its_conversations(tmp_path: Path, druks_db):
+    await Account.get_or_create(druks_db, "admin@example.com")
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    member = await Account.get_or_create(druks_db, "member@example.com")
+    outsider = await Account.get_or_create(druks_db, "outsider@example.com")
+    await Team.create(
+        druks_db, name="Notes", member_ids=[owner.id, member.id], apps=["field_notes"]
     )
+    await druks_db.flush()
 
-    assert await DUMMY_AGENT._run(workflow_id="wf-9") == DummyOutput(ok=True)
-
-    calls = {call.id: call.status for call in await AgentCall.list_for_run(db_session(), "wf-9")}
-    if resumed:
-        assert calls == {"call-left": "succeeded"}
-        assert sandbox.resume_agent.await_args.kwargs["call_id"] == "call-left"
-        sandbox.run_agent.assert_not_awaited()
-    else:
-        assert calls.pop("call-left") == "abandoned"
-        assert list(calls.values()) == ["succeeded"]
-        sandbox.resume_agent.assert_not_awaited()
-
-
-async def test_provisioning_failure_records_no_call(druks_db, tmp_path, monkeypatch, current_run):
-    """A failure before the agent starts (e.g. no VM capacity) is not an agent
-    call — the row only exists once there's a host to run on, so none is recorded."""
-    _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-
-    @asynccontextmanager
-    async def boom(self, *, idempotency_key=None, **_kwargs):
-        raise RuntimeError("no capacity")
-        yield  # pragma: no cover
-
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", boom)
-
-    with pytest.raises(RuntimeError, match="no capacity"):
-        await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert await AgentCall.list_for_run(db_session(), "wf-9") == []
-
-
-async def test_crash_after_start_fails_the_call(druks_db, tmp_path, monkeypatch, current_run):
-    """A raise after the call started (not a clean FAILED result) closes the
-    row instead of leaving it dangling RUNNING."""
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-
-    async def _boom(_harness, _manifest, **_kwargs):
-        raise RuntimeError("kaboom")
-
-    sandbox.run_agent = _boom
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    with pytest.raises(RuntimeError, match="kaboom"):
-        await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert call.status == "failed"
-    assert "kaboom" in call.last_error
-
-
-@pytest.mark.usefixtures("tmp_data_dir")
-@pytest.mark.parametrize(
-    ("error", "message"),
-    [
-        ("reported file is missing: shots/home.png", "missing"),
-        ("reported file escapes the workspace: shots/home.png", "escapes"),
-        ("reported file exceeds the 104857600-byte limit: shots/home.png", "exceeds"),
-    ],
-    ids=("missing-path", "symlink-escape", "size-cap"),
-)
-async def test_file_hydration_failure_fails_the_agent_call(
-    druks_db,
-    tmp_path,
-    monkeypatch,
-    current_run,
-    error,
-    message,
-):
-    """A rejected output file closes the already-started call as failed."""
-    current_run.app = "field_notes"
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"image": "shots/home.png"})
-    sandbox.download = AsyncMock(side_effect=SandboxDownloadError(error))
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    with pytest.raises(SandboxDownloadError, match=message):
-        await FILE_AGENT._run(workflow_id="wf-9")
-
-    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert call.status == "failed"
-    assert message in call.last_error
-    assert list((tmp_path / "files").iterdir()) == []
-
-
-@pytest.mark.usefixtures("tmp_data_dir")
-async def test_file_output_reaches_the_next_agents_input(
-    druks_db,
-    tmp_path,
-    monkeypatch,
-    current_run,
-):
-    """Call A's hydrated output reaches its artifact and call B as a fresh in-sandbox path."""
-    current_run.app = "field_notes"
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.run_agent = AsyncMock(
-        side_effect=[
-            make_agent_result({"image": "shots/home.png"}, agent="file"),
-            make_agent_result({"ok": True}, agent="dummy"),
-        ]
-    )
-
-    async def download(*, remote, local, workspace_root, max_bytes):
-        local.write_bytes(b"image")
-
-    sandbox.download = AsyncMock(side_effect=download)
-    sandbox.upload_file = AsyncMock()
-    _patch_ephemeral(monkeypatch, sandbox)
-    prompt_contexts = []
-
-    async def _template(name, *, repo):
-        async def render_async(**context):
-            prompt_contexts.append(context)
-            return name
-
-        return SimpleNamespace(render_async=render_async)
-
-    monkeypatch.setattr(agents, "get_template", _template)
-    monkeypatch.setattr(
-        FileOutput,
-        "to_artifact",
-        lambda self: {"kind": "markdown", "title": "Shot", "content": self.image.url},
-    )
-
-    produced = await FILE_AGENT._run(workflow_id="wf-9")
-    consumed = await DUMMY_AGENT._run(workflow_id="wf-9", image=produced.image)
-
-    assert consumed == DummyOutput(ok=True)
-    assert prompt_contexts[1]["image"].endswith(f"/{produced.image.id}/{produced.image.name}")
-    sandbox.upload_file.assert_awaited_once()
-    calls = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert [call.status for call in calls] == ["succeeded", "succeeded"]
-    artifact = (await db_session().scalars(select(agents.Artifact))).one()
-    content = (tmp_path / "run-wf-9" / artifact.agent_call_id / artifact.path).read_text()
-    assert content == produced.image.url
-
-
-async def test_a_carried_failure_is_raised_with_its_code(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    """The sandbox captures a harness failure on the result so the call can
-    record its cost; the agent call then re-raises that same error, and the row
-    keeps the code a retry decides on."""
-    from druks.harnesses.exceptions import HarnessOverloadedError
-
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    overloaded = HarnessOverloadedError("claude exited with 1. API Error: 529 Overloaded.")
-
-    async def _run_agent(_harness, _manifest, **_kwargs):
-        return make_agent_result(None, agent="dummy", error=overloaded)
-
-    sandbox.run_agent = _run_agent
-    _patch_ephemeral(monkeypatch, sandbox)
-
-    with pytest.raises(HarnessOverloadedError) as excinfo:
-        await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert excinfo.value is overloaded
-    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert call.status == "failed"
-    assert call.failure_code == "overloaded"
-    assert call.last_error == (
-        "dummy: HarnessOverloadedError: claude exited with 1. API Error: 529 Overloaded."
-    )
-
-
-async def test_body_level_overload_retries_as_separate_durable_attempts(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessOverloadedError
-
-    failures = [
-        HarnessOverloadedError("overloaded once"),
-        HarnessOverloadedError("overloaded twice"),
-    ]
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.run_agent = AsyncMock(
-        side_effect=[
-            make_agent_result(None, agent="dummy", error=failures[0]),
-            make_agent_result(None, agent="dummy", error=failures[1]),
-            make_agent_result({"ok": True}, agent="dummy"),
-        ]
-    )
-    _patch_ephemeral(monkeypatch, sandbox)
-    monkeypatch.setattr(agents.random, "uniform", MagicMock(side_effect=[0.95, 1.05]))
-    current_run._reap_run = AsyncMock()
-    checkpoints, sleep = _inline_agent_steps
-
-    result = await DUMMY_AGENT()
-
-    assert result == DummyOutput(ok=True)
-    assert [awaited.args[0] for awaited in sleep.await_args_list] == [285.0, 945.0]
-    assert [options["name"] for options in checkpoints] == ["test.agent.dummy"] * 3
-    assert current_run._reap_run.await_count == 2
-    calls = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert len(calls) == 3
-    assert sum(call.status == "failed" for call in calls) == 2
-    assert sum(call.status == "succeeded" for call in calls) == 1
-    assert {call.failure_code for call in calls if call.status == "failed"} == {"overloaded"}
-    assert current_run.journal.filter(DummyOutput) == [result]
-
-
-async def test_body_level_first_byte_retries_immediately_then_reraises(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessFirstByteTimeoutError
-
-    failures = [HarnessFirstByteTimeoutError(f"wedged {attempt}") for attempt in range(3)]
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.run_agent = AsyncMock(
-        side_effect=[make_agent_result(None, agent="dummy", error=failure) for failure in failures]
-    )
-    _patch_ephemeral(monkeypatch, sandbox)
-    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
-    current_run._reap_run = AsyncMock()
-    _, sleep = _inline_agent_steps
-
-    with pytest.raises(HarnessFirstByteTimeoutError) as excinfo:
-        await DUMMY_AGENT()
-
-    assert excinfo.value is failures[-1]
-    assert excinfo.value.code == "first_byte"
-    assert [awaited.args[0] for awaited in sleep.await_args_list] == [0.0, 0.0]
-    current_run._reap_run.assert_not_awaited()
-    calls = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert len(calls) == 3
-    assert all(call.status == "failed" for call in calls)
-
-
-async def test_body_level_invalid_output_retries_once_then_reraises(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessInvalidOutputError
-
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"unexpected": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-    current_run._reap_run = AsyncMock()
-    _, sleep = _inline_agent_steps
-
-    with pytest.raises(HarnessInvalidOutputError):
-        await DUMMY_AGENT()
-
-    assert sandbox.run_agent.await_count == 2
-    sleep.assert_awaited_once_with(0.0)
-    current_run._reap_run.assert_not_awaited()
-    calls = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert len(calls) == 2
-    assert all(call.status == "failed" for call in calls)
-
-
-def _async_scrape(make):
-    async def latest_for(_cls, _session, _harness, _account_id):
-        return make()
-
-    return latest_for
-
-
-def _patch_quota(monkeypatch, tmp_path, current_run, failures, *, now):
-    """An agent whose calls fail with ``failures`` in turn (None succeeds), on a clock stopped
-    at ``now``, with a scrape whose binding window resets an hour later."""
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.run_agent = AsyncMock(
-        side_effect=[
-            make_agent_result(None if failure else {"ok": True}, agent="dummy", error=failure)
-            for failure in failures
-        ]
-    )
-    _patch_ephemeral(monkeypatch, sandbox)
-    clock = MagicMock()
-    clock.now.return_value = now
-    monkeypatch.setattr(agents, "datetime", clock)
-    monkeypatch.setattr(
-        agents.UsageScrape,
-        "latest_for",
-        classmethod(
-            _async_scrape(
-                lambda: UsageScrape(
-                    five_hour_resets_at=now + timedelta(hours=2),
-                    weeks=[
-                        {
-                            "percent_left": 0,
-                            "resets_at": (now + timedelta(hours=1)).isoformat(),
-                            "model": "Fable",
-                        },
-                        {
-                            "percent_left": 20,
-                            "resets_at": (now + timedelta(days=1)).isoformat(),
-                            "model": None,
-                        },
-                    ],
+    with header_client(tmp_path) as client:
+        agent = client.post(
+            "/api/agents", json=AGENT, headers={IDENTITY_HEADER: owner.username}
+        ).json()
+        schedules = []
+        for agent_id in (agent["id"], None):
+            conversation = await Conversation.create(
+                druks_db, account_id=owner.id, body="Scan payments", agent_id=agent_id
+            )
+            schedule = await Schedule.create(
+                druks_db,
+                account_id=owner.id,
+                conversation_id=conversation.id,
+                tool="field_notes_jot_note",
+                arguments={"body": "Scan payments"},
+                cron="0 9 * * *",
+                tool_names=["field_notes_jot_note"],
+            )
+            schedules.append(schedule)
+        due_time = int(datetime(2026, 11, 2, 9, tzinfo=UTC).timestamp() * 1000)
+        for index, status in enumerate(["SUCCESS", "ERROR"]):
+            await druks_db.execute(
+                workflow_status.insert().values(
+                    workflow_uuid=f"due-time-{index}",
+                    schedule_name=schedules[0].schedule_name,
+                    status=status,
+                    created_at=due_time + index * 86_400_000,
                 )
             )
-        ),
-    )
-    monkeypatch.setattr(agents.random, "uniform", MagicMock(return_value=90.0))
-    current_run._reap_run = AsyncMock()
-    return sandbox
-
-
-async def _switch_claude_account(email: str) -> None:
-    # The run's account connects another Claude account in place of the limited one.
-    account = await Account.get_default(db_session())
-    await VaultSecret.store(
-        db_session(),
-        SecretKind.SUBSCRIPTION,
-        Audience.provider("anthropic"),
-        account_id=account.id,
-        secrets={"claudeAiOauth": {"accessToken": email}},
-        identity={"email": email},
-    )
-
-
-async def test_body_level_quota_waits_for_the_reset_once(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessRateLimitError
-
-    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
-    failures = [HarnessRateLimitError(f"quota {attempt}") for attempt in range(2)]
-    _patch_quota(monkeypatch, tmp_path, current_run, failures, now=now)
-    set_run_phase = AsyncMock()
-    monkeypatch.setattr(agents, "set_run_phase", set_run_phase)
-    post_to_chat = AsyncMock()
-    monkeypatch.setattr(agents, "_post_to_chat", post_to_chat)
-    current_run.conversation_id = "conversation-1"
-    current_run.sleep = AsyncMock(return_value=False)
-    checkpoints, _sleep = _inline_agent_steps
-
-    with pytest.raises(HarnessRateLimitError) as excinfo:
-        await DUMMY_AGENT()
-
-    assert excinfo.value is failures[-1]
-    current_run.sleep.assert_awaited_once_with(
-        60 * 60 + 90.0, label="waiting_for_quota", until="agents.quota"
-    )
-    [wait, resume] = [call.args for call in post_to_chat.await_args_list]
-    assert (wait[:2], wait[2].func, wait[2].keywords) == (
-        ("wf-9", "chat.report_quota_wait"),
-        report_quota_wait,
-        {"resumes_at": now + timedelta(hours=1, seconds=90)},
-    )
-    assert resume == ("wf-9", "chat.report_quota_resume", report_quota_resume)
-    set_run_phase.assert_any_await(
-        "waiting_for_quota",
-        ends_at=now + timedelta(hours=1, seconds=90),
-    )
-    assert [options["name"] for options in checkpoints] == [
-        "test.agent.dummy",
-        "test.agent.dummy.retry_wait",
-        "test.agent.dummy",
-    ]
-    calls = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert len(calls) == 2
-    assert all(call.failure_code == "rate_limited" for call in calls)
-
-
-async def test_a_quota_wait_woken_without_a_switch_waits_out_its_reset(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessRateLimitError
-
-    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
-    sandbox = _patch_quota(
-        monkeypatch, tmp_path, current_run, [HarnessRateLimitError("quota"), None], now=now
-    )
-    current_run.sleep = AsyncMock(side_effect=[True, False])
-
-    assert await DUMMY_AGENT() == DummyOutput(ok=True)
-
-    assert current_run.sleep.await_count == 2
-    assert current_run.sleep.await_args.args == (60 * 60 + 90.0,)
-    assert sandbox.run_agent.await_count == 2
-
-
-async def test_a_switched_account_retries_now_and_waits_out_its_own_limit_once(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessRateLimitError
-
-    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
-    failures = [HarnessRateLimitError(f"quota {attempt}") for attempt in range(3)]
-    sandbox = _patch_quota(monkeypatch, tmp_path, current_run, failures, now=now)
-
-    async def switch_on_the_first_sleep(*_args, **_kwargs):
-        if current_run.sleep.await_count == 1:
-            await _switch_claude_account("second@example.com")
-            return True
-        return False
-
-    current_run.sleep = AsyncMock(side_effect=switch_on_the_first_sleep)
-    checkpoints, _sleep = _inline_agent_steps
-
-    with pytest.raises(HarnessRateLimitError) as excinfo:
-        await DUMMY_AGENT()
-
-    assert excinfo.value is failures[-1]
-    assert current_run.sleep.await_count == 2
-    assert sandbox.run_agent.await_count == 3
-    assert [options["name"] for options in checkpoints] == [
-        "test.agent.dummy",
-        "test.agent.dummy.retry_wait",
-        "test.agent.dummy.wait_remaining",
-        "test.agent.dummy",
-        "test.agent.dummy.retry_wait",
-        "test.agent.dummy",
-    ]
-
-
-async def test_body_level_quota_reset_over_six_hours_reraises_without_sleeping(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessUsageLimitError
-
-    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
-    failure = HarnessUsageLimitError("weekly quota")
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.run_agent = AsyncMock(
-        return_value=make_agent_result(None, agent="dummy", error=failure)
-    )
-    _patch_ephemeral(monkeypatch, sandbox)
-    clock = MagicMock()
-    clock.now.return_value = now
-    monkeypatch.setattr(agents, "datetime", clock)
-    monkeypatch.setattr(
-        agents.UsageScrape,
-        "latest_for",
-        classmethod(
-            _async_scrape(
-                lambda: UsageScrape(
-                    five_hour_resets_at=now + timedelta(hours=7),
-                    weeks=[
-                        {
-                            "percent_left": 0,
-                            "resets_at": (now + timedelta(days=1)).isoformat(),
-                            "model": None,
-                        }
-                    ],
-                )
-            )
-        ),
-    )
-    current_run._reap_run = AsyncMock()
-    current_run.sleep = AsyncMock()
-
-    with pytest.raises(HarnessUsageLimitError) as excinfo:
-        await DUMMY_AGENT()
-
-    assert excinfo.value is failure
-    current_run.sleep.assert_not_awaited()
-    current_run._reap_run.assert_not_awaited()
-    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert call.failure_code == "usage_limit"
-
-
-@pytest.mark.parametrize("error_name", [pytest.param("bare"), pytest.param("auth")])
-async def test_body_level_never_retry_errors_run_once(
-    error_name, druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    from druks.harnesses.exceptions import HarnessAuthError, HarnessError, Retry
-
-    failures = {"bare": HarnessError, "auth": HarnessAuthError}
-    failure = failures[error_name]("terminal")
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    sandbox.run_agent = AsyncMock(
-        return_value=make_agent_result(None, agent="dummy", error=failure)
-    )
-    _patch_ephemeral(monkeypatch, sandbox)
-    current_run._reap_run = AsyncMock()
-    checkpoints, sleep = _inline_agent_steps
-
-    with pytest.raises(type(failure)) as excinfo:
-        await DUMMY_AGENT()
-
-    assert excinfo.value is failure
-    assert failure.retry is Retry.NEVER
-    assert [options["name"] for options in checkpoints] == ["test.agent.dummy"]
-    sleep.assert_not_awaited()
-    current_run._reap_run.assert_not_awaited()
-    sandbox.run_agent.assert_awaited_once()
-    assert len(await AgentCall.list_for_run(db_session(), "wf-9")) == 1
-
-
-async def test_in_step_transient_retry_uses_asyncio_sleep(monkeypatch, current_run):
-    from druks.harnesses.exceptions import HarnessOverloadedError
-    from druks.workflows import _in_step
-
-    attempts = 0
-
-    async def run_agent(_self, **_context):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise HarnessOverloadedError("overloaded")
-        return DummyOutput(ok=True)
-
-    monkeypatch.setattr(agents.Agent, "_run", run_agent)
-    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
-    memory_sleep = AsyncMock()
-    durable_sleep = AsyncMock()
-    monkeypatch.setattr(agents.asyncio, "sleep", memory_sleep)
-    monkeypatch.setattr(agents.DBOS, "sleep_async", durable_sleep)
-    token = _in_step.set(True)
-    try:
-        result = await DUMMY_AGENT()
-    finally:
-        _in_step.reset(token)
-
-    assert result == DummyOutput(ok=True)
-    assert attempts == 2
-    memory_sleep.assert_awaited_once_with(300.0)
-    durable_sleep.assert_not_awaited()
-
-
-async def test_in_step_quota_reraises_without_sleeping(monkeypatch, current_run):
-    from druks.harnesses.exceptions import HarnessRateLimitError
-    from druks.workflows import _in_step
-
-    failure = HarnessRateLimitError("quota")
-
-    async def run_agent(_self, **_context):
-        raise failure
-
-    monkeypatch.setattr(agents.Agent, "_run", run_agent)
-    memory_sleep = AsyncMock()
-    durable_sleep = AsyncMock()
-    monkeypatch.setattr(agents.asyncio, "sleep", memory_sleep)
-    monkeypatch.setattr(agents.DBOS, "sleep_async", durable_sleep)
-    token = _in_step.set(True)
-    try:
-        with pytest.raises(HarnessRateLimitError) as excinfo:
-            await DUMMY_AGENT()
-    finally:
-        _in_step.reset(token)
-
-    assert excinfo.value is failure
-    memory_sleep.assert_not_awaited()
-    durable_sleep.assert_not_awaited()
-
-
-def _flaky_ephemeral(sandbox, keys, *, failures):
-    """An ephemeral() that raises each error in ``failures`` in turn (recording
-    the idempotency key each attempt presents) then yields ``sandbox``. Used to
-    simulate a transient provisioning failure at acquire time that recovers."""
-    attempts = 0
-
-    @asynccontextmanager
-    async def _fake(self, *, idempotency_key=None, **_kwargs):
-        nonlocal attempts
-        keys.append(idempotency_key)
-        index = attempts
-        attempts += 1
-        if index < len(failures):
-            raise failures[index]
-        yield sandbox
-
-    return _fake
-
-
-async def test_provisioning_failure_recovers_through_durable_retry(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    """A transient provisioning failure at acquire time is retried by the
-    body-level durable path with backoff; a later attempt succeeds, and each
-    attempt presents a fresh identity, so a fresh ephemeral key."""
-    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
-
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    keys: list[str | None] = []
-    monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral",
-        _flaky_ephemeral(
-            sandbox, keys, failures=[HarnessSandboxProvisioningError("exe.dev create timed out")]
-        ),
-    )
-    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
-    current_run._reap_run = AsyncMock()
-    checkpoints, sleep = _inline_agent_steps
-
-    result = await DUMMY_AGENT()
-
-    assert result == DummyOutput(ok=True)
-    # First delay off the schedule HarnessSandboxProvisioningError inherits (60, 300).
-    assert [awaited.args[0] for awaited in sleep.await_args_list] == [60.0]
-    # Each attempt re-enters _run and asks for a fresh box under a fresh identity.
-    first, second = await _identities("wf-9")
-    assert keys == [f"wf-9:dummy:{first.id}", f"wf-9:dummy:{second.id}"]
-    # A 60s wait is under the reap-before threshold, so the (never-acquired) VM
-    # isn't reaped between attempts.
-    current_run._reap_run.assert_not_awaited()
-    # Both attempts are separate durable steps under the agent's step name.
-    assert [options["name"] for options in checkpoints] == ["test.agent.dummy"] * 2
-
-
-async def test_provisioning_failure_recovers_in_step_retry(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    """An agent invoked inside an enclosing @step retries the same transient
-    provisioning failure in memory (plain asyncio.sleep, no durable sleep) and
-    recovers, with a fresh identity and key per attempt."""
-    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
-    from druks.workflows import _in_step
-
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    keys: list[str | None] = []
-    monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral",
-        _flaky_ephemeral(
-            sandbox, keys, failures=[HarnessSandboxProvisioningError("exe.dev create timed out")]
-        ),
-    )
-    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
-    memory_sleep = AsyncMock()
-    durable_sleep = AsyncMock()
-    monkeypatch.setattr(agents.asyncio, "sleep", memory_sleep)
-    monkeypatch.setattr(agents.DBOS, "sleep_async", durable_sleep)
-
-    token = _in_step.set(True)
-    try:
-        result = await DUMMY_AGENT()
-    finally:
-        _in_step.reset(token)
-
-    assert result == DummyOutput(ok=True)
-    memory_sleep.assert_awaited_once_with(60.0)
-    durable_sleep.assert_not_awaited()
-    first, second = await _identities("wf-9")
-    assert keys == [f"wf-9:dummy:{first.id}", f"wf-9:dummy:{second.id}"]
-
-
-async def test_reused_host_retry_presents_a_stable_idempotency_key(monkeypatch, current_run):
-    """A warm workflow that reuses its sandbox re-provisions the host on the
-    same logical acquire with an unchanged idempotency key, so an ambiguous
-    create timeout resolves to the existing host instead of leaking a duplicate."""
-    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
-
-    current_run.steps_reuse_sandbox = True
-    keys: list[str | None] = []
-    host = MagicMock()
-    host.id = "warm-host"
-    host.expires_at = None
-    attempts = 0
-
-    async def fake_provision(self, *, idempotency_key=None, **_kwargs):
-        nonlocal attempts
-        keys.append(idempotency_key)
-        index = attempts
-        attempts += 1
-        if index == 0:
-            raise HarnessSandboxProvisioningError("provider slow")
-        return host
-
-    monkeypatch.setattr("druks.sandbox.client.Client.provision", fake_provision)
-
-    config = SimpleNamespace(secrets={}, secret_refs=[], secrets_hash="")
-    with pytest.raises(HarnessSandboxProvisioningError):
-        await current_run._lease_host(config, [])
-    host_id = await current_run._lease_host(config, [])
-
-    assert host_id == "warm-host"
-    assert keys == ["wf-9:workflow", "wf-9:workflow"]
-
-
-async def test_provisioning_failure_exhausts_retries_with_classified_code(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
-):
-    """When transient provisioning retries exhaust, the propagated error still
-    carries ``code=sandbox_provisioning`` — the classification survives to the
-    run's failure record instead of falling back to an empty code."""
-    from druks.harnesses.exceptions import HarnessSandboxProvisioningError
-
-    _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    failures = [HarnessSandboxProvisioningError(f"provider down {i}") for i in range(3)]
-    monkeypatch.setattr(
-        "druks.sandbox.client.Client.ephemeral", _flaky_ephemeral(None, [], failures=failures)
-    )
-    monkeypatch.setattr(agents.random, "uniform", lambda _low, _high: 1.0)
-    current_run._reap_run = AsyncMock()
-    _, sleep = _inline_agent_steps
-
-    with pytest.raises(HarnessSandboxProvisioningError) as excinfo:
-        await DUMMY_AGENT()
-
-    assert excinfo.value is failures[-1]
-    assert excinfo.value.code == "sandbox_provisioning"
-    # One sleep per inherited delay; past the schedule the failure stands.
-    assert [awaited.args[0] for awaited in sleep.await_args_list] == [60.0, 300.0]
-    # The 300s wait is over the reap-before threshold, so the run is reaped once.
-    assert current_run._reap_run.await_count == 1
-
-
-async def test_api_key_billing_hands_claude_a_placeholder(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    """Under api_key billing the VM is created with the key as a Drukbox entry. The
-    config the sandbox runs carries no key, and the durable call records none."""
-    import json
-
-    from drukbox_sdk import Secret
-
-    pasted = await installation_key()
-    key = pasted.secrets["value"]
-    await SettingsOverride.set_agent_billing(druks_db, DUMMY_AGENT.id, "api_key")
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    seen: list[dict] = []
-    keys: list[str] = []
-
-    @asynccontextmanager
-    async def fake_ephemeral(self, *, idempotency_key, secrets, **_kwargs):
-        keys.append(idempotency_key)
-        seen.append(secrets)
-        yield sandbox
-
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
-
-    await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert seen == [
-        {
-            "anthropic": Secret(
-                key,
-                host="api.anthropic.com",
-                auth_variable="ANTHROPIC_API_KEY",
-                auth_header="x-api-key",
-                auth_prefix="",
-            )
-        }
-    ]
-    config = await get_config(db_session(), DUMMY_AGENT.id, current_run.account_id)
-    # The VM's key names the pasted key, never its value.
-    assert keys == [f"wf-9:dummy:{config.secrets_hash}"]
-    assert (config.billing, config.subscription) == ("api_key", None)
-    [call] = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert (call.subscription_id, call.api_key.audience_name) == (None, "anthropic")
-    row = {column.key: getattr(call, column.key) for column in AgentCall.__table__.columns}
-    assert key not in json.dumps(row, default=str)
-
-
-@pytest.mark.parametrize(
-    "fatal_name",
-    [
-        pytest.param("SandboxValidationError", id="422"),
-        pytest.param("SandboxConflictError", id="409"),
-    ],
-)
-async def test_fatal_sdk_error_does_not_trigger_agent_retry(
-    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps, fatal_name
-):
-    """A non-transient SDK failure surfacing from acquire is not a HarnessError,
-    so it propagates on the first attempt with no retry sleep — auth/validation
-    failures can't recover without changed inputs."""
-    from drukbox_sdk import exceptions as sdk_exceptions
-
-    _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    fatal = getattr(sdk_exceptions, fatal_name)("drukbox refused the entries")
-    attempts = 0
-
-    @asynccontextmanager
-    async def fatal_ephemeral(self, *, idempotency_key=None, **_kwargs):
-        nonlocal attempts
-        attempts += 1
-        raise fatal
-        yield  # pragma: no cover
-
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fatal_ephemeral)
-    current_run._reap_run = AsyncMock()
-    _, sleep = _inline_agent_steps
-
-    with pytest.raises(type(fatal)) as excinfo:
-        await DUMMY_AGENT()
-
-    assert excinfo.value is fatal
-    assert attempts == 1
-    sleep.assert_not_awaited()
-    current_run._reap_run.assert_not_awaited()
-
-
-async def test_recovery_supersedes_the_orphaned_running_call(druks_db):
-    """A worker crash leaves a RUNNING row; the recovered step re-runs with a
-    fresh id and abandons the orphan, so the timeline shows one live step."""
-    engine = _step_engine()
-    await AgentCall.start(
-        engine,
-        call_id="a",
-        run_id="wf-9",
-        model="m",
-        agent="summarize",
-        host_id="h",
-        subscription_id=None,
-        api_key_id=(await installation_key()).id,
-    )
-    await AgentCall.start(
-        engine,
-        call_id="b",
-        run_id="wf-9",
-        model="m",
-        agent="summarize",
-        host_id="h",
-        subscription_id=None,
-        api_key_id=(await installation_key()).id,
-    )
-
-    by_id = {call.id: call for call in await AgentCall.list_for_run(db_session(), "wf-9")}
-    assert by_id["a"].status == "abandoned"
-    assert by_id["a"].finished_at is not None
-    assert by_id["b"].status == "running"
-
-
-async def test_an_after_agent_hook_call_leaves_the_hooked_call_running(druks_db):
-    for call_id, agent in (("hooked", "implement"), ("hook", "nudge")):
-        await AgentCall.start(
-            _step_engine(),
-            call_id=call_id,
-            run_id="wf-9",
-            model="m",
-            agent=agent,
-            host_id="h",
-            subscription_id=None,
-            api_key_id=(await installation_key()).id,
-        )
-
-    calls = await AgentCall.list_for_run(db_session(), "wf-9")
-    assert {call.id: call.status for call in calls} == {"hooked": "running", "hook": "running"}
-
-
-async def test_a_replay_resumes_the_ephemeral_box_through_its_identity(
-    druks_db, tmp_path, monkeypatch, current_run
-):
-    """A crashed attempt left a bound box under a live identity. The replay resumes
-    that box and creates no identity."""
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    subscription = await db_session().scalar(
-        select(VaultSecret).where(VaultSecret.kind == SecretKind.SUBSCRIPTION)
-    )
-    identity, _ = await SandboxIdentity.create(
-        db_session(),
-        account_id=(await Account.get_for_run(db_session(), None)).id,
-        run_id="wf-9",
-        scoped_to="dummy",
-        secret_refs=[SecretRef(name="anthropic", secret_id=subscription.id)],
-        secrets_hash="",
-    )
-    await identity.bind("host-crashed")
-    resumed: list[str] = []
-
-    @asynccontextmanager
-    async def fake_resume(self, *, host_id):
-        resumed.append(host_id)
-        yield sandbox
-
-    @asynccontextmanager
-    async def fake_ephemeral(self, **_kwargs):
-        pytest.fail("the replay provisioned a new box")
-        yield
-
-    monkeypatch.setattr("druks.sandbox.client.Client.resume", fake_resume)
-    monkeypatch.setattr("druks.sandbox.client.Client.ephemeral", fake_ephemeral)
-
-    result = await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert result == DummyOutput(ok=True)
-    assert resumed == ["host-crashed"]
-    assert [row.id for row in await _identities("wf-9")] == [identity.id]
-
-
-async def test_event_requires_an_artifact(druks_db, tmp_path, monkeypatch, current_run):
-    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
-    _patch_ephemeral(monkeypatch, sandbox)
-    monkeypatch.setattr(DummyOutput, "to_event", lambda self: {"topic": "review.completed"})
-
-    with pytest.raises(WorkflowError, match="without an artifact"):
-        await DUMMY_AGENT._run(workflow_id="wf-9")
-
-    assert (await AgentCall.list_for_run(db_session(), "wf-9"))[0].status == "failed"
+        url = f"/api/agents/{agent['id']}/schedules"
+        listed = client.get(url, headers={IDENTITY_HEADER: member.username})
+        hidden = client.get(url, headers={IDENTITY_HEADER: outsider.username})
+
+    assert hidden.json() == []
+    [shown] = listed.json()
+    assert (shown["id"], shown["accountId"]) == (schedules[0].id, owner.id)
+    assert (shown["lastRun"]["run"], shown["lastRun"]["status"]) == ("due-time-1", "ERROR")

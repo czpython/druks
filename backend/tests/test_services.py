@@ -10,12 +10,12 @@ import httpx
 import pytest
 from conftest import connect_service
 from druks.accounts.models import Account
-from druks.agents import Agent, AgentOutput
 from druks.apps.registry import services
 from druks.core.apis.github import GitHubAppClient
 from druks.core.services import Github
 from druks.core.webhooks.github import GitHubEvents
 from druks.db import db_session
+from druks.instructions import Instruction, InstructionOutput
 from druks.redis import close_client
 from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
@@ -594,13 +594,13 @@ def test_an_agent_holds_only_a_secret_of_a_service_with_a_host(declared_services
             api_key: SecretStr
 
     with pytest.raises(TypeError, match="Acme must declare `host`"):
-        Agent(contract=AgentOutput, secrets=(Acme.fields.api_key,))
+        Instruction(contract=InstructionOutput, secrets=(Acme.fields.api_key,))
 
     Acme.host = "api.acme.test"
     with pytest.raises(TypeError, match="Acme.fields.base_url is not a secret field"):
-        Agent(contract=AgentOutput, secrets=(Acme.fields.base_url,))
+        Instruction(contract=InstructionOutput, secrets=(Acme.fields.base_url,))
     with pytest.raises(TypeError, match="Github.fields.private_key belongs to an App key"):
-        Agent(contract=AgentOutput, secrets=(Github.fields.private_key,))
+        Instruction(contract=InstructionOutput, secrets=(Github.fields.private_key,))
 
 
 async def test_oauth_service_declarations_fail_loudly(declared_services):

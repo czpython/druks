@@ -41,6 +41,7 @@ class ClaudeHarness(Harness):
     adapter_command = ("/opt/druks-chat/node_modules/.bin/claude-agent-acp",)
     reply_command = (command, "-p")
     no_ask_mode = "bypassPermissions"
+    skills_folder = ".claude/skills"
 
     @classmethod
     def get_acp_session(
@@ -358,7 +359,7 @@ def _get_credentials(manifest: Manifest, *, include_plugins: bool = True) -> Cre
         ]
     home.append(
         HomeCopy(
-            ".claude/skills",
+            ClaudeHarness.skills_folder,
             settings.skills_dir,
             members=manifest.skills,
         )
