@@ -335,7 +335,7 @@ export const api = {
     postJSON<Team>(`/api/teams/${encodeURIComponent(teamId)}`, body, 'PUT'),
   deleteTeam: (teamId: string) => deleteRequest(`/api/teams/${encodeURIComponent(teamId)}`),
   configuredAgents: () => getJSON<ConfiguredAgent[]>('/api/configured-agents'),
-  createConfiguredAgent: (body: Omit<ConfiguredAgentInput, 'ownerId'>) =>
+  createConfiguredAgent: (body: Omit<ConfiguredAgentInput, 'ownerId' | 'slackChannelId'>) =>
     postJSON<ConfiguredAgent>('/api/configured-agents', body),
   updateConfiguredAgent: (agentId: string, body: ConfiguredAgentInput) =>
     postJSON<ConfiguredAgent>(`/api/configured-agents/${encodeURIComponent(agentId)}`, body, 'PUT'),

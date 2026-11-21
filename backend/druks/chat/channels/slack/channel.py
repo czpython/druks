@@ -73,12 +73,12 @@ class SlackChannel(Channel):
         """Route a message for the bot. A direct message or a tag reaches the linked
         account's own conversation, or waits under a private link until the person
         connects their Slack account. A tag followed by an agent's name reaches the
-        person's conversation with that agent. A tag in a thread that names
-        none reaches the person's latest conversation there. An untagged reply reaches
-        the thread conversation the person used in the last day, unless they asked for a
-        tag. The tag of an automation, which is another app's bot or a workflow, reaches
-        the default account once an admin accepted the automation, and its first tag
-        waits for that. Everything else is not for the bot."""
+        person's conversation with that agent. A tag that names none reaches the
+        person's latest conversation in the thread, or else the channel's agent. An
+        untagged reply reaches the thread conversation the person used in the last day,
+        unless they asked for a tag. The tag of an automation, which is another app's bot
+        or a workflow, reaches the default account once an admin accepted the automation,
+        and its first tag waits for that. Everything else is not for the bot."""
         if bot_id := message.get("bot_id"):
             automation = await Automation.get_or_none(
                 session, connection_id=row.id, source_id=bot_id
@@ -107,7 +107,12 @@ class SlackChannel(Channel):
                     latest = await Conversation.get_for_user(
                         session, row, user_id=message["user"], thread_id=thread_id
                     )
-                    agent = latest.agent if latest else None
+                    if latest:
+                        agent = latest.agent
+                    else:
+                        agent = await ConfiguredAgent.get_for_slack_channel(
+                            session, message["channel"]
+                        )
             if agent:
                 try:
                     agent.check_talker(linked_account)
