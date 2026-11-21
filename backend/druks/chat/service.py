@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Sequence
 from contextlib import suppress
 from datetime import datetime, timedelta
+from operator import attrgetter
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -475,7 +476,8 @@ async def send_turn(
     mcp_servers: tuple[McpServer, ...],
 ) -> Message | None:
     """Start the agent, transcribe the pending voice notes, and send the pending
-    messages. Return the turn's message, unless a Stop or pause came first."""
+    messages, with the deferred messages that wait for them. Return the turn's message,
+    unless a Stop or pause came first."""
     host = bridge.host
     status = await bridge.request("status", conversationId=conversation.id)
     if status["status"] == "running":
@@ -552,9 +554,19 @@ async def send_turn(
                     )
                 )
     # The notes are the newest messages, so they close the turn.
+    turn_messages = [*messages, *notes]
     delivered_messages = [
-        pending for pending in (*messages, *notes) if await pending.mark_delivered(session)
+        pending
+        for pending in turn_messages
+        if pending.state == MessageState.PENDING and await pending.mark_delivered(session)
     ]
+    if delivered_messages:
+        delivered_messages += [
+            pending
+            for pending in turn_messages
+            if pending.state == MessageState.DEFERRED and await pending.mark_delivered(session)
+        ]
+        delivered_messages.sort(key=attrgetter("created_at", "id"))
     await session.commit()
     if delivered_messages:
         await bridge.request(

@@ -19,7 +19,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant'
   body: string
-  state: 'pending' | 'delivered' | 'replied' | 'interrupted' | 'cancelled' | 'failed' | null
+  state: 'pending' | 'deferred' | 'delivered' | 'replied' | 'interrupted' | 'cancelled' | 'failed' | null
   replyTo: string | null
   createdAt: string
   deliveredAt: string | null

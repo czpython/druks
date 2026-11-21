@@ -28,6 +28,8 @@ class MessageState(StrEnum):
     """Where the person's message is in its turn. Replies carry no state."""
 
     PENDING = "pending"
+    # It waits for the next turn that a pending message starts.
+    DEFERRED = "deferred"
     DELIVERED = "delivered"
     REPLIED = "replied"
     INTERRUPTED = "interrupted"
