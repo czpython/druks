@@ -554,6 +554,10 @@ artifact, and result conversion. The instruction's declared contract stays uncha
 `contract` is not prompt context. Build dynamic types with Pydantic `create_model`
 and use `to_result()` to return a stable type for durable storage.
 
+Pass `agent=` with a saved agent to run the call as that agent. The call then
+uses the agent's model, on the agent's billing, and only the skills picked on
+the agent. `agent` is not prompt context either.
+
 If an agent produces a file, use [`File` and `FileField`](files.md).
 The contract declares the file, Druks transports and serves it, and the app can
 persist its stable reference on an app row.

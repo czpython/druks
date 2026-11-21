@@ -15,7 +15,6 @@ from druks.mcp import models as mcp_models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.models import SecretRef
 from druks.secrets.models import VaultSecret
-from druks.skills.models import Skill
 
 from . import exceptions
 from .datastructures import (
@@ -161,7 +160,8 @@ class Harness(ABC):
         so nothing here needs scrubbing. Identity stays off it — the manifest
         sits in the call dir whose name is the AgentCall id, and that row
         already records which agent ran; the execution record (args, timings,
-        exit code) is metadata.json beside it."""
+        exit code) is metadata.json beside it. ``skills`` are the names the
+        call receives."""
         # Declared = the enabled registry view; delivered = what actually
         # reached this call (a workspace's server owns its name — see
         # Workspace.get_all_mcp_servers). The delivered server is what
@@ -189,14 +189,12 @@ class Harness(ABC):
                     ),
                 }
             )
-        # Only the delivered skills reach the CLI home, and the harness ships
-        # exactly this list.
-        delivered = await Skill.list_delivered(session, skills)
+        # The harness ships exactly these skills to the CLI home.
         return Manifest(
             model=self.model or "",
             harness=self.name,
             mcp_servers=tuple(mcp),
-            skills=tuple(skill.name for skill in delivered),
+            skills=tuple(skills),
         )
 
     @staticmethod

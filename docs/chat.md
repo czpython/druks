@@ -377,6 +377,24 @@ page reads them from this route:
 GET /api/configured-agents/<agent id>/schedules
 ```
 
+## Tasks
+
+Some asks fit no tool, such as "get the price from this site every 2 hours".
+For these, the agent calls `chat_run_instruction` with the task in words. The
+tool starts a `chat.run_instruction` run in a fresh box. Like any run, it shows
+on the run page with its cost. In the box, the conversation's agent does the
+task with its instructions and its model, on its billing, and with only its
+picked skills. In a chat without an agent, the call uses the model set for the
+`chat.run_instruction` instruction in Settings and every enabled skill. The run
+belongs to the person in the chat and reports the task with its answer, or its
+failure, to the conversation.
+
+To repeat a task, the agent schedules the tool:
+
+```json
+{"tool": "chat_run_instruction", "arguments": {"instruction": "Visit acme.test/kettle and get the price."}, "cron": "0 */2 * * *"}
+```
+
 ## WhatsApp
 
 WhatsApp is a source for Chat. A person writes to a linked number, and Druks
