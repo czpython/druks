@@ -53,6 +53,36 @@ async def pr_open_starts_the_tickets_it_blocks(*, repo: str, pr_number: int, **_
     await _start_tickets_blocked_by(item.source, item.ticket_key)
 
 
+async def _list_blocked_items(blocker: WorkItem) -> list[WorkItem]:
+    items = []
+    if tracker := await SoftwareFactory.get_tracker(blocker.source):
+        async with tracker:
+            tickets = await tracker.get_blocking(blocker.ticket_key)
+        for ticket in tickets:
+            if item := await WorkItem.get_for_ticket_key(
+                source=ticket["source"], ticket_key=ticket["identifier"]
+            ):
+                items.append(item)
+    return items
+
+
+async def _list_stacked_items(blocker: WorkItem, branch: str) -> list[WorkItem]:
+    """The tickets that the blocker blocks whose open PR targets ``branch``."""
+    items = [
+        item
+        for item in await _list_blocked_items(blocker)
+        if item.has_open_pr and item.repo == blocker.repo
+    ]
+    stacked = []
+    if items:
+        github = await Github.get_client(blocker.repo)
+        for item in items:
+            pull_request = await github.get_pull_request(blocker.repo, item.pr_number)
+            if pull_request["base"]["ref"] == branch:
+                stacked.append(item)
+    return stacked
+
+
 @subscribe("pr.synchronized", payload__is_fork=False)
 async def blocker_push_updates_the_prs_built_on_it(
     *, repo: str, pr_number: int, payload: dict
@@ -60,35 +90,65 @@ async def blocker_push_updates_the_prs_built_on_it(
     """New commits on a blocker's branch go into each PR that targets that branch. A
     conflict stops that ticket's build and leaves its PR as it is."""
     blocker = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
-    if (
-        blocker
-        and blocker.has_open_pr
-        and (tracker := await SoftwareFactory.get_tracker(blocker.source))
-    ):
-        async with tracker:
-            tickets = await tracker.get_blocking(blocker.ticket_key)
-        github = await Github.get_client(repo)
-        for ticket in tickets:
-            item = await WorkItem.get_for_ticket_key(
-                source=ticket["source"], ticket_key=ticket["identifier"]
+    if blocker and blocker.has_open_pr:
+        stacked = await _list_stacked_items(blocker, payload["branch"])
+        if stacked:
+            github = await Github.get_client(repo)
+            for item in stacked:
+                try:
+                    await github.update_pull_request_branch(repo, item.pr_number)
+                except GitHubMergeConflictError:
+                    await Build.cancel(
+                        item,
+                        failure=(
+                            f"merge conflict with {blocker.ticket_key} (#{blocker.pr_number}), "
+                            f"whose branch {payload['branch']} has new commits"
+                        ),
+                    )
+                else:
+                    await item.announce("build.base_updated", blocker=blocker.ticket_key)
+
+
+@subscribe("pr.closed", payload__merged=True)
+async def merged_blocker_retargets_the_prs_built_on_it(
+    *, repo: str, pr_number: int, payload: dict
+) -> None:
+    """A PR that targets a merged blocker's branch moves to the base the blocker merged
+    into, and takes in that base. A conflict stops that ticket's build."""
+    blocker = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
+    if blocker:
+        stacked = await _list_stacked_items(blocker, payload["branch"])
+        if stacked:
+            github = await Github.get_client(repo)
+            blocker_pull_request = await github.get_pull_request(repo, pr_number)
+            base = blocker_pull_request["base"]["ref"]
+            for item in stacked:
+                await github.update_pull_request_base(repo, item.pr_number, base)
+                try:
+                    await github.update_pull_request_branch(repo, item.pr_number)
+                except GitHubMergeConflictError:
+                    await Build.cancel(
+                        item,
+                        failure=(
+                            f"merge conflict with {base} after {blocker.ticket_key} "
+                            f"(#{blocker.pr_number}) merged"
+                        ),
+                    )
+                else:
+                    await item.announce("build.base_retargeted", blocker=blocker.ticket_key)
+
+
+@subscribe("pr.closed", payload__merged=False)
+async def closed_blocker_stops_the_builds_on_it(*, repo: str, pr_number: int, **_: object) -> None:
+    """The build of each ticket that a blocker blocks stops when the blocker's PR closes
+    without a merge."""
+    blocker = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
+    if blocker:
+        for item in await _list_blocked_items(blocker):
+            await Build.cancel(
+                item,
+                failure=f"{blocker.ticket_key} (#{blocker.pr_number}) closed without a merge",
             )
-            if not (item and item.has_open_pr and item.repo == repo):
-                continue
-            pull_request = await github.get_pull_request(repo, item.pr_number)
-            if pull_request["base"]["ref"] != payload["branch"]:
-                continue
-            try:
-                await github.update_pull_request_branch(repo, item.pr_number)
-            except GitHubMergeConflictError:
-                await Build.cancel(
-                    item,
-                    failure=(
-                        f"merge conflict with {blocker.ticket_key} (#{blocker.pr_number}), "
-                        f"whose branch {payload['branch']} has new commits"
-                    ),
-                )
-            else:
-                await item.announce("build.base_updated", blocker=blocker.ticket_key)
 
 
 @subscribe(WorkflowEvent.RUNNING, workflow=Build)

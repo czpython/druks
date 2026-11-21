@@ -12,6 +12,7 @@ const TOPICS: Record<string, string> = {
   'build.rejected': 'Build could not start',
   'build.waiting': 'Waiting on blockers',
   'build.base_updated': 'Updated from its blocker',
+  'build.base_retargeted': 'Retargeted after its blocker merged',
 }
 
 function label(event: ActivityEvent): string | undefined {
@@ -45,6 +46,7 @@ const TOPIC_ICONS: Record<string, LucideIcon> = {
   'build.rejected': OctagonX,
   'build.waiting': Hourglass,
   'build.base_updated': GitPullRequest,
+  'build.base_retargeted': GitPullRequest,
 }
 
 const REPLY_ACTIONS: Record<string, string> = {
@@ -64,7 +66,7 @@ export function activity(event: ActivityEvent): ActivityPresentation {
     context = [facts.repo, facts.pr_number && `#${facts.pr_number}`].filter(Boolean).join(' · ') || undefined
   } else if (event.topic === 'build.waiting') {
     context = facts.blockers?.join(', ')
-  } else if (event.topic === 'build.base_updated') {
+  } else if (['build.base_updated', 'build.base_retargeted'].includes(event.topic)) {
     context = facts.blocker
   } else if (event.topic === 'workflow.running' && facts.gate) {
     const gateName = facts.gate === 'review_work' ? 'Implementation review' : facts.gate === 'review' ? 'Plan review' : undefined

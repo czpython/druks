@@ -18,6 +18,7 @@ describe('Factory Activity', () => {
     ['build.rejected', null, 'Build could not start'],
     ['build.waiting', null, 'Waiting on blockers'],
     ['build.base_updated', null, 'Updated from its blocker'],
+    ['build.base_retargeted', null, 'Retargeted after its blocker merged'],
     ['workflow.cancelled', 'software_factory.build', 'Build cancelled'],
   ])('formats %s through the app registry', (topic, workflow, label) => {
     expect(eventLine({ id: 'event:1', seq: 1, at: '2026-09-09T12:00:00Z',

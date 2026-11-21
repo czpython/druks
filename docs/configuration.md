@@ -660,8 +660,11 @@ it blocks. A build starts on the branch of the open pull request of a blocker in
 its repository, and opens its pull request against that branch. With more than
 one such pull request, the ticket waits until one is left. When new commits reach
 the branch of a blocker's pull request, Druks updates each pull request that
-targets that branch. A merge conflict cancels that ticket's build, and its pull
-request stays as it is. A
+targets that branch. When the blocker's pull request merges, each of them moves
+to the branch that the blocker merged into, and takes in that branch. When the
+blocker's pull request closes without a merge, the builds of the tickets that it
+blocks stop. On a merge conflict, Druks cancels that ticket's build and leaves
+its pull request on the branch it has. A
 ticket at the trigger status with no other open blocker starts its build. No
 person starts that build, so it uses the account of the ticket assignee.
 **druks** board tickets do not wait for blockers.
