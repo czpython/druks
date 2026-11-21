@@ -15,6 +15,10 @@ class GitHubAppNotInstalledError(DruksError):
         self.repo = repo
 
 
+class GitHubMergeConflictError(DruksError):
+    """GitHub could not merge the base of a pull request into its branch."""
+
+
 class GitHubAppNotActiveError(DruksError):
     """The GitHub App has no installation that is not suspended."""
 

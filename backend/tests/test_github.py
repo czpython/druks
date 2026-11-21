@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, Mock, call
 import druks.core.apis.github as github_api
 import pytest
 from conftest import connect_service
-from druks.core.apis.exceptions import GitHubAppNotActiveError, GitHubAppNotInstalledError
+from druks.core.apis.exceptions import (
+    GitHubAppNotActiveError,
+    GitHubAppNotInstalledError,
+    GitHubMergeConflictError,
+)
 from druks.core.apis.github import GitHubAppClient, GitHubClient
 from druks.core.services import Github
 from druks.services import Connection, ServiceNotConnectedError
@@ -93,13 +97,14 @@ async def test_enable_auto_merge_uses_squash_mutation() -> None:
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, text: str = "") -> None:
         self.status_code = status_code
+        self.text = text
 
 
-def _make_request_failed(status_code: int) -> RequestFailed:
+def _make_request_failed(status_code: int, text: str = "") -> RequestFailed:
     exc = RequestFailed.__new__(RequestFailed)
-    exc.response = _FakeResponse(status_code)  # type: ignore[assignment]
+    exc.response = _FakeResponse(status_code, text)  # type: ignore[assignment]
     return exc
 
 
@@ -150,6 +155,15 @@ async def test_update_pull_request_branch_accepts_already_current_branch() -> No
     await client.update_pull_request_branch("ClawHaven/example", 7)
 
     pulls.async_update_branch.assert_awaited_once_with("ClawHaven", "example", 7)
+
+
+async def test_update_pull_request_branch_raises_on_a_merge_conflict() -> None:
+    error = _make_request_failed(422, "merge conflict between base and head")
+    pulls = SimpleNamespace(async_update_branch=AsyncMock(side_effect=error))
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(pulls=pulls)))
+
+    with pytest.raises(GitHubMergeConflictError):
+        await client.update_pull_request_branch("ClawHaven/example", 7)
 
 
 async def test_update_pull_request_branch_raises_other_failures() -> None:
@@ -243,6 +257,13 @@ async def test_merge_when_ready_arms_auto_merge_before_updating_branch() -> None
         call.enable_auto_merge("ClawHaven/example", "PR_node"),
         call.update_pull_request_branch("ClawHaven/example", 7),
     ]
+
+
+async def test_merge_when_ready_keeps_auto_merge_armed_when_the_branch_update_conflicts() -> None:
+    client, _ = _merge_when_ready_client(squash_merge_accepted=False)
+    client.update_pull_request_branch.side_effect = GitHubMergeConflictError("ClawHaven/example#7")
+
+    assert await client.merge_when_ready("ClawHaven/example", 7)
 
 
 async def test_merge_when_ready_reports_unsettled_merge() -> None:

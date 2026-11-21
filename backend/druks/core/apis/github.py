@@ -2,6 +2,7 @@ import base64
 import logging
 import time
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -13,7 +14,11 @@ from githubkit.exception import GraphQLFailed, RequestFailed
 from githubkit.retry import RETRY_SERVER_ERROR
 from githubkit.utils import UNSET
 
-from druks.core.apis.exceptions import GitHubAppNotActiveError, GitHubAppNotInstalledError
+from druks.core.apis.exceptions import (
+    GitHubAppNotActiveError,
+    GitHubAppNotInstalledError,
+    GitHubMergeConflictError,
+)
 from druks.core.utils.time import ensure_utc
 
 logger = logging.getLogger(__name__)
@@ -375,9 +380,10 @@ class GitHubClient:
         try:
             await self._github.rest.pulls.async_update_branch(owner, name, pr_number)
         except RequestFailed as error:
-            if error.response.status_code == 422:
-                return
-            raise
+            if error.response.status_code != 422:
+                raise
+            if "conflict" in error.response.text:
+                raise GitHubMergeConflictError(f"{repo}#{pr_number}") from error
 
     async def merge_when_ready(self, repo: str, pr_number: int) -> bool:
         """Whether GitHub accepted ownership of the merge."""
@@ -391,7 +397,8 @@ class GitHubClient:
         if await self.squash_merge_pull_request(repo, pr_number):
             return True
         if await self.enable_auto_merge(repo, pull_request["node_id"]):
-            await self.update_pull_request_branch(repo, pr_number)
+            with suppress(GitHubMergeConflictError):
+                await self.update_pull_request_branch(repo, pr_number)
             return True
         return False
 
