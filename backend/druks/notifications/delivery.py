@@ -71,16 +71,21 @@ async def deliver(
     token: str | None = None,
     deep_link: str | None = None,
     outcome: str = "",
+    question_offset: int | None = None,
 ) -> dict:
     """Post ``body`` as markdown, with ``deep_link`` on the line after it. Each action
     becomes a button that carries ``token``, so a click answers this notification. With
     ``message_ts``, Druks edits that posted message, and ``outcome`` takes the place of its
-    buttons. With ``user``, only that person sees the message. Returns Slack's answer,
-    which names the message's channel and ts."""
+    buttons. With ``user``, only that person sees the message. ``question_offset`` is where
+    a chat agent's question starts in ``body``. Returns Slack's answer, which names the
+    message's channel and ts."""
     link = f"\n{deep_link}" if deep_link else ""
+    reply, question = body, ""
+    if question_offset:
+        reply, question = body[:question_offset], body[question_offset:]
     # Slack refuses markdown longer than this, so a long body loses its end and
     # keeps the link, which opens the full text.
-    text = cut_markdown(body, MARKDOWN_TEXT_LIMIT - len(link)) + link
+    text = cut_markdown(reply, MARKDOWN_TEXT_LIMIT - len(question) - len(link)) + question + link
     blocks = [{"type": "markdown", "text": text}]
     if actions:
         blocks.append(

@@ -11,9 +11,7 @@ from druks.chat.models import Conversation
 from druks.core.services import Slack
 from druks.durable.constants import NOTIFICATIONS_QUEUE
 from druks.durable.engine import enqueue_in_transaction, step_session
-from druks.notifications import exceptions
-from druks.notifications.constants import CLOSE_WORKFLOW, CLOSED_MESSAGE, SEND_WORKFLOW
-from druks.notifications.datastructures import NotificationState
+from druks.notifications import constants, exceptions
 from druks.notifications.delivery import deliver
 from druks.notifications.models import Notification
 from druks.secrets.datastructures import Audience
@@ -31,7 +29,7 @@ logger = logging.getLogger(__name__)
 _SEND_RETRIES: StepOptions = {"retries_allowed": True, "max_attempts": 5}
 
 
-@DBOS.workflow(name=SEND_WORKFLOW)
+@DBOS.workflow(name=constants.SEND_WORKFLOW)
 async def send_notification(notification_id: str) -> None:
     async def _send() -> None:
         async with step_session() as session:
@@ -40,7 +38,7 @@ async def send_notification(notification_id: str) -> None:
             # row delivered and stops. At-least-once: a crash after the send but
             # before this step checkpoints re-posts once on recovery — the click
             # side is idempotent, so a duplicate message is the accepted cost.
-            if notification.state == NotificationState.DELIVERED:
+            if notification.delivered_at:
                 return
             notification.attempts += 1
         # Delivery runs after that session commits, so a refusal still counts the
@@ -76,7 +74,8 @@ async def send_notification(notification_id: str) -> None:
                     raise
                 posted = await post(channels[1])
             message_id = f"{posted['channel']}:{posted['ts']}"
-        # Kept so that Druks can close the message when its question ends without a click.
+        # Kept so that Druks can close the message when its question ends without a click,
+        # and so that a chat's agent knows its question in the thread as its own.
         async with step_session() as session:
             await (await session.get(Notification, notification_id)).mark_delivered(message_id)
 
@@ -117,10 +116,15 @@ async def notify_account(
         body=body,
         deep_link=f"{endpoint}{path}" if endpoint else None,
     )
+    await queue_send(session, notification)
+
+
+async def queue_send(session: AsyncSession, notification: Notification) -> None:
+    """Queue the send of the notification, in the session's transaction."""
     options: EnqueueOptions = {
-        "workflow_name": SEND_WORKFLOW,
+        "workflow_name": constants.SEND_WORKFLOW,
         "queue_name": NOTIFICATIONS_QUEUE,
-        "workflow_id": f"{SEND_WORKFLOW}:{notification.id}",
+        "workflow_id": f"{constants.SEND_WORKFLOW}:{notification.id}",
     }
     await enqueue_in_transaction(session, options, notification.id)
 
@@ -140,7 +144,7 @@ async def list_account_channels(session: AsyncSession, account_id: str) -> list[
     return channels
 
 
-@DBOS.workflow(name=CLOSE_WORKFLOW)
+@DBOS.workflow(name=constants.CLOSE_WORKFLOW)
 async def close_notifications(run_id: str, parked_at: str) -> None:
     # The claims make a rerun redo only the messages still open, so the body needs no step.
     async with step_session() as session:
@@ -153,6 +157,32 @@ async def close_notifications(run_id: str, parked_at: str) -> None:
                     await remove_buttons(session, notification)
                 except (exceptions.DeliveryError, ServiceNotConnectedError) as error:
                     logger.warning("notification %s kept its buttons: %s", notification.id, error)
+
+
+async def close_questions(session: AsyncSession, conversation_id: str) -> None:
+    """Claim each open question of the conversation's agent, and queue the removal of
+    its buttons, in the session's transaction."""
+    for question in await Notification.list_open_questions(session, conversation_id):
+        if await question.mark_acknowledged():
+            options: EnqueueOptions = {
+                "workflow_name": constants.CLOSE_QUESTION_WORKFLOW,
+                "queue_name": NOTIFICATIONS_QUEUE,
+                "workflow_id": f"{constants.CLOSE_QUESTION_WORKFLOW}:{question.id}",
+            }
+            await enqueue_in_transaction(session, options, question.id)
+
+
+@DBOS.workflow(name=constants.CLOSE_QUESTION_WORKFLOW)
+async def close_question(notification_id: str) -> None:
+    """Take the buttons off the question's message once its send has ended."""
+    await DBOS.get_result_async(f"{constants.SEND_WORKFLOW}:{notification_id}")
+    async with step_session() as session:
+        notification = await session.get(Notification, notification_id)
+        if notification.message_id:
+            try:
+                await remove_buttons(session, notification)
+            except (exceptions.DeliveryError, ServiceNotConnectedError) as error:
+                logger.warning("notification %s kept its buttons: %s", notification.id, error)
 
 
 async def remove_buttons(session: AsyncSession, notification: Notification) -> None:
@@ -170,5 +200,5 @@ async def remove_buttons(session: AsyncSession, notification: Notification) -> N
             notification.body,
             message_ts=message_ts,
             deep_link=notification.deep_link,
-            outcome=CLOSED_MESSAGE,
+            outcome=constants.CLOSED_MESSAGE,
         )

@@ -35,6 +35,8 @@ from druks.mcp.helpers import get_bearer_token_env_var
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.mcp.server import get_tool_name
 from druks.models import Base
+from druks.notifications.models import Notification
+from druks.notifications.outbox import close_questions, queue_send
 from druks.prompts import render_prompt
 from druks.redis import get_client
 from druks.sandbox.client import sandbox_client
@@ -90,6 +92,11 @@ logger = logging.getLogger(__name__)
 
 def events_key(conversation_id: str) -> str:
     return f"chat:{conversation_id}:events"
+
+
+def question_key(conversation_id: str, message_id: str) -> str:
+    """The key that holds the question of the turn of ``message_id`` until the turn ends."""
+    return f"chat:{conversation_id}:question:{message_id}"
 
 
 async def publish(conversation_id: str, event: dict) -> None:
@@ -567,6 +574,9 @@ async def send_turn(
             if pending.state == MessageState.DEFERRED and await pending.mark_delivered(session)
         ]
         delivered_messages.sort(key=attrgetter("created_at", "id"))
+    # What the person writes answers the agent's open questions, so their buttons go.
+    if any(not delivered.is_internal for delivered in delivered_messages):
+        await close_questions(session, conversation.id)
     await session.commit()
     if delivered_messages:
         await bridge.request(
@@ -715,18 +725,36 @@ async def finish_turn(
     status: dict,
 ) -> None:
     """Save the reply and the agent's session files, and send a channel's reply to its
-    person."""
+    person. The question that the agent asked in the turn follows the reply. A channel
+    with buttons gets both in one message, with a button for each choice. Elsewhere the
+    reply ends with the question and its numbered choices."""
     body, tool_calls = await bridge.reply(conversation.id, message.id)
     state = MessageState(status["status"])
     await conversation.end_turn(session, state)
     reply = await conversation.create_message(
         session, body, role=MessageRole.ASSISTANT, reply_to=message, tool_calls=tool_calls
     )
+    redis = get_client()
+    saved = await redis.get(question_key(conversation.id, message.id))
+    ask = {}
+    # A turn that the person stopped asks nothing.
+    if saved and state == MessageState.REPLIED:
+        ask = json.loads(saved)
+    separator = "\n\n" if reply.answer else ""
+    channel = conversation.channel
+    if ask and not (channel and channel.has_buttons):
+        # The person can answer with a choice's number.
+        reply.body += (
+            separator
+            + ask["question"]
+            + "".join(f"\n{number}. {choice}" for number, choice in enumerate(ask["choices"], 1))
+        )
     if status["archivePath"]:
         session_file = File(path=status["archivePath"])
         await bridge.host.save_files(session, [session_file], app="chat")
         await conversation.set_session_file(session, session_file)
     await session.commit()
+    await redis.delete(question_key(conversation.id, message.id))
     await reset_live_stream(conversation.id)
     # A person who took the chat over during the turn answers it instead.
     if (
@@ -734,7 +762,22 @@ async def finish_turn(
         and state == MessageState.REPLIED
         and not await conversation.is_held(session)
     ):
-        if reply.answer:
+        if ask and channel.has_buttons:
+            # The question starts where the reply ends, so a cut to fit takes only the reply.
+            notification = await Notification.create(
+                session,
+                conversation_id=conversation.id,
+                reason="question.asked",
+                body=reply.answer + separator + ask["question"],
+                question_offset=len(reply.answer),
+                actions=[
+                    {"id": str(number), "label": choice}
+                    for number, choice in enumerate(ask["choices"], 1)
+                ],
+            )
+            await queue_send(session, notification)
+            await session.commit()
+        elif reply.answer:
             await conversation.channel.send_reply(session, conversation, reply)
         elif message.body == NO_ANSWER_MESSAGE:
             failure = await conversation.create_message(

@@ -1,16 +1,23 @@
 from types import SimpleNamespace
 
 import pytest
+from conftest import bind_ambient_session, install_service
+from druks.accounts.models import Account
+from druks.chat.channels.slack.channel import SlackChannel
+from druks.chat.enums import ConversationSource
+from druks.chat.models import Conversation
 from druks.core.apis.slack import SlackClient
+from druks.core.webhooks.slack import replace_buttons
 from druks.durable.models import AgentCall, Artifact, Run
 from druks.notifications.buttons import decode_button, encode_button
-from druks.notifications.constants import MARKDOWN_TEXT_LIMIT
+from druks.notifications.constants import CLOSED_MESSAGE, MARKDOWN_TEXT_LIMIT
 from druks.notifications.delivery import cut_markdown, deliver
 from druks.notifications.exceptions import (
     ChannelUnavailableError,
     DeliveryError,
     MalformedButtonError,
 )
+from druks.notifications.models import Notification
 from druks.testing import seed_call, seed_run
 from druks_field_notes.workflows import Summarize
 from slack_sdk.errors import SlackApiError
@@ -56,6 +63,53 @@ async def test_a_body_too_long_for_slack_is_cut_and_keeps_its_link(slack):
     assert post["text"].startswith("Your run failed: xxx")
     assert post["text"].endswith(f"x\n\n…\n{link}")
     assert post["blocks"] == [{"type": "markdown", "text": post["text"]}]
+
+
+async def test_a_long_reply_before_a_question_loses_its_end_and_the_question_stays(druks_db, slack):
+    bind_ambient_session(druks_db)
+    await install_service(
+        "slack",
+        access_token=_BOT_TOKEN,
+        identity={"client_id": "c1"},
+        secrets={"client_secret": "s"},
+    )
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    conversation = Conversation(
+        account_id=account.id,
+        source=ConversationSource.SLACK,
+        user_id="U1",
+        thread_id="C1:1700000000.000100",
+    )
+    druks_db.add(conversation)
+    await druks_db.flush()
+    reply = "I compared both.\n" * 1_000
+    question = await Notification.create(
+        druks_db,
+        conversation_id=conversation.id,
+        reason="question.asked",
+        body=f"{reply}\n\nWhich database?",
+        question_offset=len(reply),
+        actions=[{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}],
+    )
+
+    await SlackChannel.post_buttons(druks_db, conversation, question)
+    await replace_buttons(question.id, channel="C1", message_ts="1.0", outcome="<@U1> chose MySQL.")
+    question.message_id = "C1:1.0"
+    await SlackChannel.remove_buttons(druks_db, conversation, question)
+
+    posted, clicked, closed = slack.posts
+    for post in slack.posts:
+        assert len(post["text"]) <= MARKDOWN_TEXT_LIMIT
+        assert post["text"].endswith("I compared both.\n\n…\n\nWhich database?")
+        assert post["blocks"][0] == {"type": "markdown", "text": post["text"]}
+    assert [button["text"]["text"] for button in posted["blocks"][1]["elements"]] == [
+        "Postgres",
+        "MySQL",
+    ]
+    for edit, outcome in ((clicked, "<@U1> chose MySQL."), (closed, CLOSED_MESSAGE)):
+        assert edit["blocks"][1:] == [
+            {"type": "section", "text": {"type": "mrkdwn", "text": outcome}}
+        ]
 
 
 @pytest.mark.parametrize(

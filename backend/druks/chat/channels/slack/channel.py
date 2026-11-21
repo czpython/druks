@@ -237,17 +237,24 @@ class SlackChannel(Channel):
     async def post_buttons(
         cls, session: AsyncSession, conversation: Conversation, notification: Notification
     ) -> str:
-        """Post the notification in the conversation's thread, or its DM."""
+        """Post the notification in the conversation's thread, or its DM. A notification
+        that an answer closed before the post says that its question is closed, in place
+        of its buttons."""
         client = SlackClient(token=await Slack.get_bot_token())
         room, _, thread_ts = conversation.thread_id.partition(":")
+        actions, outcome = notification.actions, ""
+        if notification.is_acknowledged:
+            actions, outcome = None, CLOSED_MESSAGE
         posted = await deliver_notification(
             client,
             room or conversation.user_id,
             notification.body,
             thread_ts=thread_ts,
-            actions=notification.actions,
+            actions=actions,
             token=notification.correlation_token,
             deep_link=notification.deep_link,
+            outcome=outcome,
+            question_offset=notification.question_offset,
         )
         return f"{posted['channel']}:{posted['ts']}"
 
@@ -265,6 +272,7 @@ class SlackChannel(Channel):
             message_ts=message_ts,
             deep_link=notification.deep_link,
             outcome=CLOSED_MESSAGE,
+            question_offset=notification.question_offset,
         )
 
     @classmethod

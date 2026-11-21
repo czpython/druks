@@ -1,3 +1,4 @@
+import json
 from contextlib import suppress
 from datetime import datetime
 from typing import Annotated
@@ -5,6 +6,7 @@ from typing import Annotated
 from dbos import DBOS
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from githubkit.exception import RequestFailed
+from pydantic import StringConstraints
 from slack_sdk.errors import SlackApiError
 
 from druks.accounts.context import current_conversation_id
@@ -13,6 +15,8 @@ from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.durable.reads import list_active_runs_for_conversation
 from druks.durable.schemas import ActiveRunResponse
+from druks.redis import get_client
+from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.exceptions import SandboxUploadError
 
 from .channels.whatsapp.exceptions import NumberNotOnWhatsAppError, WahaError
@@ -31,7 +35,7 @@ from .schemas import (
     MessageResponse,
     ReminderResponse,
 )
-from .service import cancel_turn, deliver, publish, upload_file
+from .service import cancel_turn, deliver, publish, question_key, upload_file
 
 router = APIRouter()
 
@@ -284,6 +288,45 @@ async def require_tag(
         raise HTTPException(409, "This conversation has no thread. Every message reaches you.")
     conversation.is_tag_required = is_required
     await session.commit()
+
+
+@router.put("/question", operation_id="ask", status_code=204, tags=["agent"])
+async def ask(
+    session: SessionDep,
+    question: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+        Body(description="The question, as the person reads it."),
+    ],
+    choices: Annotated[
+        list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=75)]],
+        Body(
+            min_length=2,
+            max_length=4,
+            description="Two to four short labels, in the order to show them.",
+        ),
+    ],
+    account: Account = Depends(current_account),
+) -> None:
+    """Ask the person of the conversation this call comes from one question, with two to
+    four choices. Druks sends it after your reply, when your turn ends. A channel with
+    buttons shows a button for each choice. Elsewhere the choices are a numbered list.
+    Make this your last tool call, and write any reply after it: the text before it stays
+    your notes. Do not repeat the question or its choices in the reply. Then end your
+    turn, and do not wait for the answer. The person's choice, or what they write instead,
+    reaches you as their next message. A second call in the turn replaces the question."""
+    conversation_id = current_conversation_id.get()
+    if not conversation_id:
+        raise HTTPException(409, "This tool asks in a conversation. Call it from one.")
+    conversation = await session.get(Conversation, conversation_id)
+    message = await conversation.get_unanswered_message(session)
+    if not message or message.state != MessageState.DELIVERED:
+        raise HTTPException(409, "No turn runs in this conversation. Call it during a turn.")
+    await get_client().set(
+        question_key(conversation.id, message.id),
+        json.dumps({"question": question, "choices": choices}),
+        ex=SANDBOX_HOST_LEASE_SECONDS,
+    )
 
 
 @router.post(

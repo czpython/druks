@@ -24,6 +24,7 @@ from druks.core.services import Slack
 from druks.core.webhooks.slack import SlackEvents, SlackInteractivity
 from druks.mcp.inbound import get_druks_mcp_server
 from druks.models import Base
+from druks.notifications.models import Notification
 from druks.redis import close_client, get_client
 from druks.sandbox.exceptions import SandboxUploadError
 from druks.sandbox.layout import get_work_root
@@ -600,7 +601,8 @@ async def test_the_bot_welcomes_a_room_when_it_joins_and_ignores_other_joins(car
 
 async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_db, monkeypatch):
     """Ben's agent answers in the same thread as the same bot: only the replies this
-    conversation recorded are the agent's own. A file on a message is listed by id."""
+    conversation recorded are the agent's own. A reply that asked posted as its
+    question's message. A file on a message is listed by id."""
     ana = await Account.get_or_create(druks_db, "ana@example.com")
     reads = thread_reads(
         monkeypatch,
@@ -609,12 +611,21 @@ async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_d
             {"ts": "10.1", "user": BOT, "text": "Sure."},
             {"ts": "10.2", "user": "U200", "text": "", "files": [shared_file()]},
             {"ts": "10.3", "user": BOT, "text": "Hi Ben."},
+            {"ts": "10.4", "user": BOT, "text": "Which database?"},
         ],
     )
     conversation = await thread_conversation(druks_db, card, ana)
     await conversation.create_message(
         druks_db, "Sure.", role=MessageRole.ASSISTANT, source_id="C1:10.1"
     )
+    question = await Notification.create(
+        druks_db,
+        conversation_id=conversation.id,
+        reason="question.asked",
+        body="Which database?",
+        actions=[{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}],
+    )
+    await question.mark_delivered("C1:10.4")
 
     thread = await SlackChannel.read_thread(druks_db, conversation)
     await SlackChannel.read_thread(druks_db, conversation)
@@ -627,11 +638,13 @@ async def test_the_agent_reads_its_thread_and_knows_who_wrote_what(card, druks_d
         ("10.1", "Druks", True, False),
         ("10.2", "Ben", False, False),
         ("10.3", "Druks", False, False),
+        ("10.4", "Druks", True, False),
     ]
     assert [message["files"] for message in thread] == [
         [],
         [],
         [{"id": "F1", "name": "plan.pdf", "content_type": "application/pdf"}],
+        [],
         [],
     ]
     assert reads.count("users.info") == 3

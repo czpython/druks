@@ -20,7 +20,7 @@ class Channel:
     has_turns: ClassVar[bool] = True
     # Whether chat_read_thread reads the channel's threads, where other people write too.
     has_readable_threads: ClassVar[bool] = False
-    # Whether the channel shows a parked run's controls as buttons in the conversation.
+    # Whether the channel shows a parked run's controls and the agent's choices as buttons.
     has_buttons: ClassVar[bool] = False
     # The reaction that acknowledges a person's message, as the channel names it.
     reaction_ack: ClassVar[str]
@@ -46,7 +46,8 @@ class Channel:
         cls, session: AsyncSession, conversation: Conversation, notification: Notification
     ) -> str:
         """Post the notification with its actions as buttons where the conversation lives.
-        Returns the posted message's id, as the channel names it."""
+        A notification that an answer closed before the post says that its question is
+        closed instead. Returns the posted message's id, as the channel names it."""
         raise NotImplementedError
 
     @classmethod

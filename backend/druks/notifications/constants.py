@@ -13,6 +13,9 @@ TRUNCATION_MARKER = "\n\n…"
 # The workflow that closes the messages of a run's question, by the name a run queues it.
 CLOSE_WORKFLOW = "notifications.close"
 
+# The workflow that closes the message of a chat agent's question, by the name a chat queues it.
+CLOSE_QUESTION_WORKFLOW = "notifications.close_question"
+
 # The workflow that sends one notification, by the name a producer queues it.
 SEND_WORKFLOW = "notifications.send"
 
