@@ -42,11 +42,13 @@ from druks.sandbox import gate as sandbox_gate
 from druks.sandbox.models import SecretRef
 from druks.secrets.enums import SecretKind
 from druks.settings import get_settings
+from druks.skills.models import Skill
 from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, _post_to_chat, current_workflow
 
 if TYPE_CHECKING:
     from druks.browser.sessions import BrowserSession
+    from druks.configured_agents.models import ConfiguredAgent
     from druks.harnesses.base import Harness
     from druks.sandbox.datastructures import AgentResult
     from druks.sandbox.host import Host
@@ -193,14 +195,20 @@ class Instruction:
         return await get_config(db_session(), self.id, workflow.account_id)
 
     async def __call__(
-        self, *, contract: type[InstructionOutput] | None = None, **context: object
+        self,
+        *,
+        contract: type[InstructionOutput] | None = None,
+        agent: "ConfiguredAgent | None" = None,
+        **context: object,
     ) -> Any:
         """Run the instruction — ``await SoftwareFactory.implement(...)`` — as a durable step in the
         current workflow and return its parsed output. An instruction run is always memoized —
         this picks which step does it: its own, or the @step it's already inside.
         workflow_id comes from the workflow context, not the caller; everything
         else (repo, …) is prompt context. ``contract`` overrides the output
-        contract for this call, including schema generation and validation."""
+        contract for this call, including schema generation and validation. ``agent``
+        runs the call as that saved agent: with its model, on its billing, and with
+        only its skills."""
         if not self.id:
             # Built loose — never assigned to an App, never given an explicit
             # id — so its settings, its registry entry and the call it would record
@@ -217,7 +225,9 @@ class Instruction:
             )
 
         async def _invoke() -> Any:
-            return await self._run(workflow_id=workflow.workflow_id, contract=contract, **context)
+            return await self._run(
+                workflow_id=workflow.workflow_id, contract=contract, agent=agent, **context
+            )
 
         if _in_step.get():
             transient_retry_index = 0
@@ -264,8 +274,9 @@ class Instruction:
                     quota = await DBOS.run_step_async(
                         StepOptions(name=f"{workflow.kind}.agent.{self.id}.retry_wait"),
                         _quota_retry_wait,
-                        self.id,
+                        self,
                         workflow.account_id,
+                        agent,
                     )
                     # A far-off reset (an exhausted weekly window) isn't worth
                     # sleeping into — fail now.
@@ -279,7 +290,7 @@ class Instruction:
                             functools.partial(report_quota_wait, resumes_at=quota["resumes_at"]),
                         )
                     # A wait that a switch ends does not use the retry.
-                    quota_retried = await self._wait_out_quota(workflow, quota)
+                    quota_retried = await self._wait_out_quota(workflow, quota, agent)
                     if workflow.conversation_id:
                         await _post_to_chat(
                             workflow.workflow_id, "chat.report_quota_resume", report_quota_resume
@@ -301,7 +312,7 @@ class Instruction:
                 workflow.journal.add(result)
                 return result
 
-    async def _wait_out_quota(self, workflow, quota: dict) -> bool:
+    async def _wait_out_quota(self, workflow, quota: dict, agent: "ConfiguredAgent | None") -> bool:
         """Sleep until the quota resets. Return False early when the agent switches to another
         account, model, or billing."""
         wait_seconds = quota["wait_seconds"]
@@ -315,11 +326,21 @@ class Instruction:
             wait_seconds = await DBOS.run_step_async(
                 StepOptions(name=f"{workflow.kind}.agent.{self.id}.wait_remaining"),
                 _quota_wait_remaining,
-                self.id,
+                self,
                 workflow.account_id,
+                agent,
                 quota,
             )
         return False
+
+    async def _get_config(
+        self, session: AsyncSession, account_id: str | None, agent: "ConfiguredAgent | None"
+    ) -> AgentConfig:
+        """How one call runs: as the saved agent when it has one, else by this
+        instruction's settings for the account."""
+        if agent:
+            return await agent.get_config(session)
+        return await get_config(session, self.id, account_id)
 
     @classmethod
     async def wake_runs_waiting_for_quota(cls, session: AsyncSession) -> None:
@@ -337,6 +358,7 @@ class Instruction:
         *,
         workflow_id: str,
         contract: type[InstructionOutput] | None = None,
+        agent: "ConfiguredAgent | None" = None,
         **context: Any,
     ) -> Any:
         """The raw execution: read what the call needs, provision or attach a host,
@@ -358,7 +380,7 @@ class Instruction:
         async with step_session() as session:
             # Refusing an unservable call here beats provisioning a VM and
             # 401ing mid-run.
-            config = await get_config(session, self.id, workflow.account_id)
+            config = await self._get_config(session, workflow.account_id, agent)
             call_id = config.harness_class.mint_run_id(None)
             running = await AgentCall.lookup_running(session, workflow_id, self.id)
         model = config.model
@@ -427,10 +449,16 @@ class Instruction:
                 harness = config.harness_class(
                     model=config.model, fast_mode=config.fast_mode, effort=config.effort
                 )
+                if agent:
+                    # An agent with no skills gets none, not the whole catalog.
+                    enabled = {skill.name for skill in await Skill.list_enabled(session)}
+                    skills = [name for name in agent.skills if name in enabled]
+                else:
+                    requested = await workspace_class.get_skills(subject)
+                    delivered = await Skill.list_delivered(session, requested)
+                    skills = [skill.name for skill in delivered]
                 manifest = await harness.get_manifest(
-                    session,
-                    mcp_servers=mcp_servers,
-                    skills=await workspace_class.get_skills(subject),
+                    session, mcp_servers=mcp_servers, skills=skills
                 )
             # An agent browser's box holds the call's key, so the box belongs to
             # the call: it is never the warm box, and no other attempt resumes it.
@@ -613,11 +641,13 @@ class Instruction:
         return harness.get_after_agent_reply("\n\n".join(text for text in texts if text))
 
 
-async def _quota_retry_wait(agent_id: str, account_id: str | None) -> dict:
+async def _quota_retry_wait(
+    instruction: Instruction, account_id: str | None, agent: "ConfiguredAgent | None"
+) -> dict:
     # Runs as its own step: replay reuses the recorded wait instead of
     # re-reading the scrape.
     async with step_session() as session:
-        config = await get_config(session, agent_id, account_id)
+        config = await instruction._get_config(session, account_id, agent)
         provider_id = config.model.partition("/")[0]
         scrape = await UsageScrape.latest_for(session, provider_id, config.charged_account_id)
     now = datetime.now(UTC)
@@ -638,9 +668,11 @@ async def _quota_retry_wait(agent_id: str, account_id: str | None) -> dict:
     }
 
 
-async def _quota_wait_remaining(agent_id: str, account_id: str | None, quota: dict) -> float:
+async def _quota_wait_remaining(
+    instruction: Instruction, account_id: str | None, agent: "ConfiguredAgent | None", quota: dict
+) -> float:
     async with step_session() as session:
-        config = await get_config(session, agent_id, account_id)
+        config = await instruction._get_config(session, account_id, agent)
     # Another account, model, or billing retries now.
     if (
         config.model != quota["model"]

@@ -10,10 +10,12 @@ from uuid import uuid4
 import asyncssh
 import pytest
 from conftest import connect_anthropic_subscription
+from druks.accounts.context import current_conversation_id
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import channels, services
 from druks.chat import service, sockets
+from druks.chat.app import Chat
 from druks.chat.bots import service as bot_service
 from druks.chat.bridge import Bridge
 from druks.chat.constants import (
@@ -32,11 +34,13 @@ from druks.chat.exceptions import (
     ChatSandboxGone,
 )
 from druks.chat.models import Conversation, Message
+from druks.chat.workflows import RunInstruction
 from druks.configured_agents.models import ConfiguredAgent
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import get_session, session_scope
 from druks.durable.constants import TASK_QUEUE
 from druks.durable.dbos_state import workflow_status
+from druks.exceptions import PermissionDenied
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.harnesses.claude import ClaudeHarness
@@ -60,11 +64,12 @@ from druks.testing import (
     asgi_client,
     configure_app_for_test,
     make_settings,
+    run_workflow,
     seed_call,
     seed_run,
 )
 from druks.user_settings.models import SettingsOverride
-from druks.workflows import Subject
+from druks.workflows import _CONVERSATION_INPUT_KEY, Subject
 from druks_field_notes.app import FieldNotes
 from druks_field_notes.workflows import Summarize
 from fastapi import WebSocket, WebSocketDisconnect
@@ -1839,3 +1844,85 @@ async def test_the_conversation_list_names_the_agent_that_answers(druks_db, tmp_
     plain, with_agent = sorted(listed.json(), key=lambda entry: bool(entry["agentId"]))
     assert (with_agent["agentId"], with_agent["agentName"]) == (agent.id, agent.name)
     assert (plain["agentId"], plain["agentName"]) == (None, None)
+
+
+async def test_an_agent_starts_a_task_run_only_from_a_chat(
+    druks_db, conversation, tmp_path, monkeypatch
+):
+    started_from = []
+
+    async def start(*, subject, instruction):
+        started_from.append((subject, instruction, current_conversation_id.get()))
+        return "run-1"
+
+    monkeypatch.setattr(RunInstruction, "start", start)
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    owner = {"X-User": "owner@example.com"}
+    task = {"instruction": "Get the price of the blue kettle."}
+    async with asgi_client(api) as client:
+        nowhere = await client.post("/api/chat/instructions", json=task, headers=owner)
+        started = await client.post(
+            "/api/chat/instructions",
+            json=task,
+            headers={**owner, CONVERSATION_HEADER: conversation.id},
+        )
+
+    assert (nowhere.status_code, started.status_code) == (422, 202)
+    assert started.json() == "run-1"
+    assert started_from == [(None, "Get the price of the blue kettle.", conversation.id)]
+
+
+async def test_a_task_run_refuses_once_a_public_agent_turns_private(druks_db, monkeypatch):
+    owner = await Account.get_or_create(druks_db, "owner@example.com")
+    other = await Account.get_or_create(druks_db, "other@example.com")
+    agent = await ConfiguredAgent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    conversation = await Conversation.create(
+        druks_db, account_id=other.id, body="Get the price", agent_id=agent.id
+    )
+    await agent.replace(druks_db, editor=owner, owner_id=owner.id, **{**AGENT, "is_private": True})
+    await druks_db.commit()
+    run_instruction = AsyncMock()
+    monkeypatch.setattr(Chat, "run_instruction", run_instruction)
+
+    with pytest.raises(PermissionDenied, match="Only the agent's owner"):
+        await run_workflow(
+            RunInstruction,
+            account_id=other.id,
+            instruction="Get the price of the blue kettle.",
+            **{_CONVERSATION_INPUT_KEY: conversation.id},
+        )
+
+    run_instruction.assert_not_awaited()
+
+
+async def test_a_task_run_does_the_task_as_the_chats_agent(druks_db, monkeypatch):
+    subscription = await connect_anthropic_subscription("owner@example.com")
+    owner = await Account.get(druks_db, id=subscription.account_id)
+    agent = await ConfiguredAgent.create(druks_db, owner=owner, **AGENT)
+    conversation = await Conversation.create(
+        druks_db, account_id=owner.id, body="Get the price", agent_id=agent.id
+    )
+    await druks_db.commit()
+    run_instruction = AsyncMock(return_value="The blue kettle costs 40 euros.")
+    monkeypatch.setattr(Chat, "run_instruction", run_instruction)
+
+    answer = await run_workflow(
+        RunInstruction,
+        account_id=owner.id,
+        instruction="Get the price of the blue kettle.",
+        **{_CONVERSATION_INPUT_KEY: conversation.id},
+    )
+
+    assert answer == {
+        "task": "Get the price of the blue kettle.",
+        "answer": "The blue kettle costs 40 euros.",
+    }
+    kwargs = run_instruction.await_args.kwargs
+    assert (kwargs["agent"].id, kwargs["agent_instructions"], kwargs["instruction"]) == (
+        agent.id,
+        "Answer as a security engineer.",
+        "Get the price of the blue kettle.",
+    )
