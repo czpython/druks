@@ -187,7 +187,16 @@ class Build(Workflow):
         if tracker := await SoftwareFactory.get_tracker():
             async with tracker:
                 blockers = await tracker.get_blocked_by(ticket["identifier"])
-                if open_blockers := [key for key, is_open in blockers.items() if is_open]:
+                open_blockers = []
+                for key, is_open in blockers.items():
+                    # A blocker whose PR is open is ready for review, so it no longer
+                    # holds the ticket even though the tracker still has it open.
+                    blocker = await WorkItem.get_for_ticket_key(
+                        source=ticket["source"], ticket_key=key
+                    )
+                    if is_open and not (blocker and blocker.has_open_pr):
+                        open_blockers.append(key)
+                if open_blockers:
                     await item.announce("build.waiting", blockers=open_blockers)
                     raise TicketBlocked(ticket["identifier"], open_blockers)
                 account_id = await tracker.get_account_id(ticket["assignee_id"])

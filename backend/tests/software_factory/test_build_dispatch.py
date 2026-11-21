@@ -286,6 +286,86 @@ async def test_dispatch_waits_on_an_open_blocker(druks_db, monkeypatch, started)
     assert event.payload["blockers"] == ["ACME-18"]
 
 
+async def test_dispatch_starts_when_the_open_blocker_has_an_open_pr(
+    druks_db, monkeypatch, started
+) -> None:
+    await _connect_github()
+    blocker = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-40")
+    await blocker.update(pr_number=41)
+    item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-42")
+    _use_tracker(monkeypatch, _FakeTracker(blocked_by={"ACME-40": True}))
+
+    await Build.dispatch(ticket=_ticket(item))
+
+    assert started == ["ACME-42"]
+
+
+async def test_dispatch_waits_on_a_blocker_whose_pr_closed_without_a_merge(
+    druks_db, monkeypatch, started
+) -> None:
+    await _connect_github()
+    blocker = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-43")
+    await blocker.update(pr_number=44)
+    await blocker.resolve(Resolution.CLOSED, at=datetime.now(UTC))
+    item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-45")
+    _use_tracker(monkeypatch, _FakeTracker(blocked_by={"ACME-43": True}))
+
+    with pytest.raises(TicketBlocked):
+        await Build.dispatch(ticket=_ticket(item))
+
+    assert started == []
+
+
+async def test_dispatch_names_only_the_blockers_that_still_hold_the_ticket(
+    druks_db, monkeypatch, started
+) -> None:
+    await _connect_github()
+    with_pr = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-46")
+    await with_pr.update(pr_number=47)
+    await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-48")
+    item = await make_test_work_item(repo="o/r", title="t", ticket_key="ACME-49")
+    _use_tracker(
+        monkeypatch, _FakeTracker(blocked_by={"ACME-46": True, "ACME-48": True, "ACME-50": True})
+    )
+
+    with pytest.raises(TicketBlocked, match="ACME-48, ACME-50"):
+        await Build.dispatch(ticket=_ticket(item))
+
+    assert started == []
+    [event] = await druks_db.scalars(select(Event))
+    assert event.payload["blockers"] == ["ACME-48", "ACME-50"]
+
+
+async def test_a_blockers_pr_opening_starts_each_ticket_it_blocks(
+    druks_db, monkeypatch, started
+) -> None:
+    await _connect_github()
+    settings = await SoftwareFactory.settings()
+    blocker = await make_test_work_item(
+        repo="o/r", title="t", ticket_key="ACME-51", source=settings.tracker
+    )
+    await blocker.update(branch="agent/ACME-51")
+    waiting = await make_test_work_item(
+        repo="o/r", title="t", ticket_key="ACME-52", source=settings.tracker
+    )
+    _use_tracker(
+        monkeypatch,
+        _FakeTracker(
+            blocked_by={"ACME-51": True},
+            blocking={"ACME-52": _ticket(waiting, status=settings.trigger_status)},
+        ),
+    )
+
+    await publish(
+        "pr.opened",
+        repo="o/r",
+        pr_number=53,
+        payload={"branch": "agent/ACME-51", "is_fork": False},
+    )
+
+    assert started == ["ACME-52"]
+
+
 async def test_a_done_ticket_starts_each_ticket_it_blocks_at_the_trigger_status(
     druks_db, monkeypatch, started
 ) -> None:

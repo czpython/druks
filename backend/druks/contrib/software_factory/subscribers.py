@@ -45,6 +45,12 @@ async def pr_open_fills_the_item(*, repo: str, pr_number: int, payload: dict) ->
             await item.announce("build.pr_opened", repo=item.repo, pr_number=pr_number)
 
 
+@subscribe("build.pr_opened")
+async def pr_open_starts_the_tickets_it_blocks(*, repo: str, pr_number: int, **_: object) -> None:
+    item = await WorkItem.get_for_pr(repo=repo, pr_number=pr_number)
+    await _start_tickets_blocked_by(item.source, item.ticket_key)
+
+
 @subscribe(WorkflowEvent.RUNNING, workflow=Build)
 async def build_start_marks_ticket_in_progress(
     *, subject: WorkItem, result: dict | None = None, **_: object
@@ -185,8 +191,13 @@ async def done_ticket_starts_the_tickets_it_blocks(*, payload: dict) -> None:
     settings = await SoftwareFactory.settings()
     if payload["status"] != settings.done_status:
         return
-    if tracker := await SoftwareFactory.get_tracker(payload["source"]):
+    await _start_tickets_blocked_by(payload["source"], payload["identifier"])
+
+
+async def _start_tickets_blocked_by(source: str, key: str) -> None:
+    """Send each ticket that this one blocks through the funnel again."""
+    if tracker := await SoftwareFactory.get_tracker(source):
         async with tracker:
-            tickets = await tracker.get_blocking(payload["identifier"])
+            tickets = await tracker.get_blocking(key)
         for ticket in tickets:
             await ticket_transition_drives_the_funnel(payload=ticket)

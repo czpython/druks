@@ -251,6 +251,10 @@ class WorkItem(StoredSubject):
     def ref(self) -> str | None:
         return self.branch
 
+    @property
+    def has_open_pr(self) -> bool:
+        return bool(self.pr_number and not self.resolution)
+
     def __str__(self) -> str:
         return f"{self.ticket_key} {self.title}".strip()
 
