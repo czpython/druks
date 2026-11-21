@@ -246,7 +246,7 @@ class _FakeTracker(Tracker):
         return list(self.blocking.values())
 
     async def get_status_name(self, key):
-        return self.blocking[key]["status"]
+        return self.blocking.get(key, {}).get("status", "")
 
     async def set_status(self, key, status):
         return
@@ -544,7 +544,7 @@ async def test_dispatch_starts_with_one_open_pr_in_its_repo_and_one_in_another(
 
 async def _dependent_of_a_blocker(monkeypatch, *, base: str):
     """A blocker and a dependent, both with open PRs, and a GitHub client whose PR of the
-    dependent targets ``base``."""
+    dependent targets ``base``. The blocker's PR targets main."""
     settings = await SoftwareFactory.settings()
     blocker = await make_test_work_item(
         repo="o/r", title="t", ticket_key="ACME-80", source=settings.tracker
@@ -562,8 +562,12 @@ async def _dependent_of_a_blocker(monkeypatch, *, base: str):
         ),
     )
     github = SimpleNamespace(
-        get_pull_request=AsyncMock(return_value={"base": {"ref": base}}),
+        get_pull_request=AsyncMock(
+            side_effect=lambda repo, number: {"base": {"ref": "main" if number == 81 else base}}
+        ),
+        update_pull_request_base=AsyncMock(),
         update_pull_request_branch=AsyncMock(),
+        delete_branch=AsyncMock(),
     )
 
     async def get_client(repo):
@@ -618,3 +622,62 @@ async def test_a_conflicting_update_stops_the_dependent_build_with_a_reason(
     assert run.failure == (
         "merge conflict with ACME-80 (#81), whose branch agent/ACME-80 has new commits"
     )
+
+
+async def _blocker_pr_ends(*, merged: bool) -> None:
+    await publish(
+        "pr.closed",
+        repo="o/r",
+        pr_number=81,
+        payload={"branch": "agent/ACME-80", "merged": merged, "resolved_at": datetime.now(UTC)},
+    )
+
+
+async def test_a_merged_blocker_moves_the_pr_built_on_it_to_the_base_it_merged_into(
+    druks_db, monkeypatch
+) -> None:
+    github = await _dependent_of_a_blocker(monkeypatch, base="agent/ACME-80")
+
+    await _blocker_pr_ends(merged=True)
+
+    github.update_pull_request_base.assert_awaited_once_with("o/r", 83, "main")
+    github.update_pull_request_branch.assert_awaited_once_with("o/r", 83)
+    [event] = await druks_db.scalars(select(Event).where(Event.type == "build.base_retargeted"))
+    assert event.payload == {"blocker": "ACME-80"}
+
+
+async def test_a_merged_blocker_leaves_a_pr_that_targets_another_branch(
+    druks_db, monkeypatch
+) -> None:
+    github = await _dependent_of_a_blocker(monkeypatch, base="main")
+
+    await _blocker_pr_ends(merged=True)
+
+    github.update_pull_request_base.assert_not_awaited()
+
+
+async def test_a_conflict_after_the_blocker_merged_stops_the_dependent_build(
+    druks_db, monkeypatch
+) -> None:
+    github = await _dependent_of_a_blocker(monkeypatch, base="agent/ACME-80")
+    github.update_pull_request_branch.side_effect = GitHubMergeConflictError("o/r#83")
+    dependent = await WorkItem.get_for_ticket_key(source="linear", ticket_key="ACME-82")
+    run = await seed_build_run(druks_db, work_item_id=dependent.id, state="running")
+
+    await _blocker_pr_ends(merged=True)
+
+    await druks_db.refresh(run)
+    assert run.failure == "merge conflict with main after ACME-80 (#81) merged"
+
+
+async def test_a_blocker_closed_without_a_merge_stops_the_builds_of_the_tickets_it_blocks(
+    druks_db, monkeypatch
+) -> None:
+    await _dependent_of_a_blocker(monkeypatch, base="agent/ACME-80")
+    dependent = await WorkItem.get_for_ticket_key(source="linear", ticket_key="ACME-82")
+    run = await seed_build_run(druks_db, work_item_id=dependent.id, state="running")
+
+    await _blocker_pr_ends(merged=False)
+
+    await druks_db.refresh(run)
+    assert run.failure == "ACME-80 (#81) closed without a merge"

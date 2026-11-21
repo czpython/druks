@@ -385,6 +385,10 @@ class GitHubClient:
             if "conflict" in error.response.text:
                 raise GitHubMergeConflictError(f"{repo}#{pr_number}") from error
 
+    async def update_pull_request_base(self, repo: str, pr_number: int, base: str) -> None:
+        owner, name = repo.split("/", 1)
+        await self._github.rest.pulls.async_update(owner, name, pr_number, base=base)
+
     async def merge_when_ready(self, repo: str, pr_number: int) -> bool:
         """Whether GitHub accepted ownership of the merge."""
         pull_request = await self.get_pull_request(repo, pr_number)
