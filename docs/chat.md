@@ -628,6 +628,18 @@ reaches nobody. When you tag the bot before you connect Slack, it answers in the
 thread that your account is not connected, and sends you the link in a direct
 message.
 
+To ask an agent you saved, write its name right after the tag:
+`@Druks Security engineer check this PR`. Case does not matter, and the longest
+name wins, so "Security engineer" beats "Security". A name before the tag does
+not count. A comma or a colon after the tag is fine. The agent answers in your
+own conversation with it for that thread, so one thread can hold your
+conversations with several agents. A tag that names no agent reaches the
+conversation you last wrote in there, or the Bot if you have none. Your untagged
+replies reach the conversation you last wrote in, under the 24-hour rule above
+and the tag rule below. Name an agent you cannot talk to, and the bot says why
+in the thread and drops the message. The same tag works in a direct message,
+where a name without the tag reaches the Bot.
+
 Tell the agent to answer only when you tag it, and your untagged replies in that
 thread stop reaching it. The agent records your choice with `chat_require_tag`.
 Tell it to answer your replies again, and they reach it again for the rest of the
