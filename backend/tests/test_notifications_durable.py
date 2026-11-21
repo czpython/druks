@@ -10,7 +10,7 @@ from druks.accounts.context import current_conversation_id
 from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.chat.channels.slack import channel as slack_channel
-from druks.chat.enums import ConversationSource, MessageRole
+from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.models import Conversation, Message
 from druks.core.services import Slack
 from druks.core.webhooks import slack as slack_webhooks
@@ -1026,12 +1026,15 @@ async def test_a_slack_chat_s_review_offers_its_buttons_in_its_thread(rt, delive
 
     session = get_session(rt.engine)
     try:
-        bodies = await session.scalars(
-            select(Message.body).where(Message.conversation_id == conversation_id)
+        (approval,) = await session.scalars(
+            select(Message).where(Message.conversation_id == conversation_id)
         )
-        assert any("Its buttons are in this thread" in body for body in bodies)
+        assert "Its buttons are in this thread" in approval.body
+        assert (approval.is_internal, approval.state) == (True, MessageState.DEFERRED)
     finally:
         await session.close()
+    # The ask with its buttons is the person's one message, so the park starts no turn.
+    assert not await DBOS.list_workflows_async(name="chat.deliver", parent_workflow_id=workflow_id)
 
     # The review asks a question, so the click goes to the chat, and the run waits for
     # the agent's answer.

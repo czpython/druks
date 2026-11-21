@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from druks.accounts.enums import AccountKind
 from druks.apps.loader import get_app
 from druks.chat.constants import PARKED_BUTTONS_MESSAGE, PARKED_MESSAGE
-from druks.chat.enums import BotAccess, PauseSignal
+from druks.chat.enums import BotAccess, MessageState, PauseSignal
 from druks.chat.models import Conversation
 from druks.chat.service import deliver, report_outcome
 from druks.durable.constants import PAUSE_QUEUE
@@ -272,13 +272,15 @@ async def ask_for_answer(session: AsyncSession, run: Run) -> str | None:
     return admin.id
 
 
-async def request_approval(session: AsyncSession, run: Run) -> str | None:
-    """Request the approval a parked run that a chat started waits on, when the chat's
-    thread holds its buttons. The chat's agent points the person at them. Returns the
-    conversation to deliver."""
-    if not run.input_request:
-        return
+async def request_approval(session: AsyncSession, run: Run) -> None:
+    """Keep the approval that a parked run waits on for the next turn of the chat that
+    started it, when the chat's thread holds its buttons. The buttons ask the person, so
+    no turn starts now."""
+    conversation = await session.get(Conversation, run.conversation_id)
     request = to_json(await run.get_ask()).decode()
-    return await report_outcome(
-        session, run, PARKED_BUTTONS_MESSAGE.format(run=run.id, request=request)
+    await conversation.create_message(
+        session,
+        PARKED_BUTTONS_MESSAGE.format(run=run.id, request=request),
+        is_internal=True,
+        state=MessageState.DEFERRED,
     )

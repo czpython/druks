@@ -22,6 +22,7 @@ from druks.chat.constants import (
     DELIVERY_FAILED_MESSAGE,
     NAMING_PROMPT,
     NO_ANSWER_MESSAGE,
+    PARKED_BUTTONS_MESSAGE,
 )
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
 from druks.chat.exceptions import (
@@ -32,7 +33,7 @@ from druks.chat.exceptions import (
 )
 from druks.chat.models import Conversation, Message
 from druks.contrib.software_factory.app import SoftwareFactory
-from druks.database import get_session
+from druks.database import get_session, session_scope
 from druks.durable.constants import TASK_QUEUE
 from druks.durable.dbos_state import workflow_status
 from druks.files.datastructures import File
@@ -64,6 +65,7 @@ from druks.workflows import Subject
 from druks_field_notes.app import FieldNotes
 from druks_field_notes.workflows import Summarize
 from fastapi import WebSocket, WebSocketDisconnect
+from pydantic_core import to_json
 from sqlalchemy import delete, select
 
 CODEX_KEY_LOGIN = json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": "${CODEX_API_KEY}"})
@@ -132,6 +134,61 @@ async def sandbox(druks_db, conversation, monkeypatch):
     monkeypatch.setattr(service, "get_config", AsyncMock(return_value=config))
     monkeypatch.setattr(service, "sandbox_client", SimpleNamespace(set_expiry=AsyncMock()))
     return host, identity
+
+
+@pytest.fixture
+async def thread_run(druks_db, conversation, sandbox, monkeypatch):
+    """A run that the conversation's Slack thread started and that waits for the thread's
+    buttons, and the prompts that the thread's agent gets. The agent answers each one."""
+    conversation.source = "slack"
+    conversation.connection = await VaultSecret.store(
+        druks_db,
+        services.get("slack").secret_kind,
+        Audience.service("slack"),
+        identity={},
+        secrets={},
+    )
+    run = await seed_run(
+        druks_db,
+        kind="test",
+        state="parked",
+        input_gate="review",
+        input_request={
+            "presentation": "in_app",
+            "questions": [],
+            "controls": [
+                {"id": "approve", "note_required": False},
+                {"id": "request_changes", "note_required": True},
+            ],
+        },
+        account_id=conversation.account_id,
+    )
+    run.conversation_id = conversation.id
+    await druks_db.commit()
+    state = {
+        "status": "idle",
+        "sessionId": "one",
+        "messageId": "",
+        "harness": "claude",
+        "epoch": "sandbox-one",
+        "sequence": 0,
+        "archivePath": "",
+    }
+    prompts = []
+
+    async def request(self, method, **values):
+        if method == "prompt":
+            prompts.append(values)
+            state.update(status="replied", messageId=values["messageId"])
+        elif method == "events":
+            return {"events": []}
+        return state
+
+    monkeypatch.setattr(Bridge, "request", request)
+    monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=("Done.", [])))
+    monkeypatch.setattr(channels.get("slack"), "send_reply", AsyncMock())
+    monkeypatch.setattr(Conversation, "is_held", AsyncMock(return_value=False))
+    return run, prompts
 
 
 async def test_new_conversation_is_unnamed_private_and_answers_in_order(druks_db, conversation):
@@ -1362,6 +1419,40 @@ async def test_stop_after_send_targets_the_message_and_leaves_the_queue(
     assert second.state == "pending"
 
 
+@pytest.mark.parametrize("is_listed", [False, True])
+async def test_a_stop_before_delivery_leaves_the_approval_for_the_next_turn(
+    druks_db, conversation, thread_run, monkeypatch, is_listed
+):
+    run, prompts = thread_run
+    first = await conversation.get_unanswered_message(druks_db)
+    await bot_service.request_approval(druks_db, run)
+    list_pending_messages = Conversation.list_pending_messages
+
+    async def stop():
+        # The Stop's own session leaves the delivery's copy of the message pending.
+        async with session_scope() as stopper:
+            await service.cancel_turn(stopper, conversation, first)
+
+    async def list_around_the_stop(self, session):
+        if not is_listed:
+            await stop()
+        messages = await list_pending_messages(self, session)
+        if is_listed:
+            await stop()
+        return messages
+
+    monkeypatch.setattr(Conversation, "list_pending_messages", list_around_the_stop)
+
+    await service.deliver_pending(druks_db, conversation)
+
+    assert prompts == []
+    _, approval = await list_messages(druks_db, conversation)
+    await druks_db.refresh(first)
+    await druks_db.refresh(approval)
+    assert first.state == MessageState.CANCELLED
+    assert (approval.state, approval.delivered_at) == (MessageState.DEFERRED, None)
+
+
 async def test_cancel_route_only_changes_the_requested_pending_message(
     druks_db, conversation, tmp_path, monkeypatch
 ):
@@ -1489,6 +1580,46 @@ async def test_a_parked_run_asks_the_chat_that_started_it(druks_db, conversation
     assert ask.is_internal
     assert run.id in ask.body
     assert "Approve the plan" in ask.body
+
+
+async def test_an_approval_that_parks_during_a_turn_starts_no_turn_after_it(
+    druks_db, conversation, thread_run, monkeypatch
+):
+    run, prompts = thread_run
+    first = await conversation.get_unanswered_message(druks_db)
+    request = Bridge.request
+
+    async def park_during_the_turn(self, method, **values):
+        if method == "prompt" and not prompts:
+            await bot_service.request_approval(druks_db, run)
+        return await request(self, method, **values)
+
+    monkeypatch.setattr(Bridge, "request", park_during_the_turn)
+
+    await service.deliver_pending(druks_db, conversation)
+
+    assert [prompt["messageId"] for prompt in prompts] == [first.id]
+    _, approval, reply = await list_messages(druks_db, conversation)
+    assert (approval.state, approval.delivered_at) == (MessageState.DEFERRED, None)
+    assert (reply.reply_to, reply.body) == (first.id, "Done.")
+
+
+async def test_the_next_message_carries_the_waiting_approval(druks_db, conversation, thread_run):
+    run, prompts = thread_run
+    [first] = await list_messages(druks_db, conversation)
+    first.state = MessageState.REPLIED
+    await bot_service.request_approval(druks_db, run)
+    question = await conversation.create_message(druks_db, "What does it wait for?")
+    _, approval, _ = await list_messages(druks_db, conversation)
+
+    await service.deliver_pending(druks_db, conversation)
+
+    request = to_json(await run.get_ask()).decode()
+    assert [[block["text"] for block in prompt["content"][1:]] for prompt in prompts] == [
+        [PARKED_BUTTONS_MESSAGE.format(run=run.id, request=request), question.body],
+    ]
+    assert [prompt["messageId"] for prompt in prompts] == [question.id]
+    assert (approval.state, bool(approval.delivered_at)) == (MessageState.REPLIED, True)
 
 
 async def test_each_turn_opens_with_the_local_time(monkeypatch):

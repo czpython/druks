@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from druks.accounts.models import Account
+from druks.chat.bots.service import request_approval
 from druks.chat.constants import CLICK_ANSWER_MESSAGE
-from druks.chat.enums import ConversationSource
+from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
 from druks.contrib.software_factory.workflows import Build
@@ -315,6 +316,7 @@ async def test_a_click_that_needs_more_goes_to_the_chat(
         "druks.notifications.services.DBOS", SimpleNamespace(start_workflow_async=started)
     )
     run, notification = await _thread_notification(druks_db, ask=ask)
+    await request_approval(druks_db, run)
 
     await respond_to_notification(
         druks_db,
@@ -326,12 +328,9 @@ async def test_a_click_that_needs_more_goes_to_the_chat(
 
     assert resume_spy == []
     assert notification.is_acknowledged
-    messages = await druks_db.execute(
-        select(Message.body, Message.is_internal).where(
-            Message.conversation_id == run.conversation_id
-        )
-    )
-    assert messages.all() == [(label, False)]
+    conversation = await druks_db.get(Conversation, run.conversation_id)
+    click = await conversation.get_unanswered_message(druks_db)
+    assert (click.body, click.role, click.is_internal) == (label, MessageRole.USER, False)
     started.assert_awaited_once_with(deliver, run.conversation_id)
 
 
