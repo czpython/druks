@@ -24,14 +24,22 @@ export function AgentsPage({ account }: { account: Account }) {
   })
   const keysQuery = useQuery({ queryKey: ['providerKeys'], queryFn: api.providerKeys })
   const catalogsQuery = useQuery({ queryKey: ['providerCatalogs'], queryFn: api.providerCatalogs })
+  const isAdmin = account.role === 'admin'
+  // Without a Slack connection the list fails, and the choice offers only no channel.
+  const channelsQuery = useQuery({
+    queryKey: ['notificationChannels'],
+    queryFn: api.listNotificationChannels,
+    enabled: isAdmin,
+    retry: false,
+  })
   const [draft, setDraft] = useState<ConfiguredAgentInput | null>(null)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const isAdmin = account.role === 'admin'
   const agents = agentsQuery.data ?? []
   const accounts = accountsQuery.data ?? []
   const usernames = new Map(accounts.map((entry) => [entry.id, entry.username]))
+  const channels = channelsQuery.data ?? []
   const skills = (skillsQuery.data ?? [])
     .flatMap((collection) => collection.skills)
     .filter((skill) => skill.enabled)
@@ -65,6 +73,7 @@ export function AgentsPage({ account }: { account: Account }) {
       model: '',
       isPrivate: true,
       ownerId: account.id,
+      slackChannelId: null,
     })
     setEditingAgentId(null)
     setError(null)
@@ -92,8 +101,8 @@ export function AgentsPage({ account }: { account: Account }) {
     setBusy(true)
     setError(null)
     try {
-      const { ownerId, ...input } = agent
-      if (editingAgentId) await api.updateConfiguredAgent(editingAgentId, { ...input, ownerId })
+      const { ownerId, slackChannelId, ...input } = agent
+      if (editingAgentId) await api.updateConfiguredAgent(editingAgentId, { ...input, ownerId, slackChannelId })
       else await api.createConfiguredAgent(input)
       await queryClient.invalidateQueries({ queryKey: ['configuredAgents'] })
       setDraft(null)
@@ -281,6 +290,30 @@ export function AgentsPage({ account }: { account: Account }) {
               <span>{usernames.get(draft.ownerId)}</span>
             )}
           </Field>
+          {isAdmin && editingAgentId && (
+            <Field
+              label="Slack channel"
+              help="A tag that names no agent in this channel reaches this agent. Only a public agent can have one. Invite the bot to a channel to see it here."
+            >
+              <Select
+                aria-label="Slack channel"
+                value={draft.slackChannelId ?? ''}
+                onChange={(event) => setDraft({ ...draft, slackChannelId: event.target.value || null })}
+                disabled={busy}
+              >
+                <option value="">No channel</option>
+                {draft.slackChannelId &&
+                  !channels.some((channel) => channel.id === draft.slackChannelId) && (
+                    <option value={draft.slackChannelId}>{draft.slackChannelId}</option>
+                  )}
+                {channels.map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    #{channel.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <div className="mcp-actions">
             <Button
               onClick={() => {

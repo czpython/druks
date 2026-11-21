@@ -71,6 +71,7 @@ beforeEach(() => {
     model: 'claude-opus',
     isPrivate: false,
     ownerId: 'admin',
+    slackChannelId: null,
   })
   vi.spyOn(api, 'accounts').mockResolvedValue([admin, member])
   vi.spyOn(api, 'configuredAgentSchedules').mockResolvedValue([

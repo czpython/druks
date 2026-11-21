@@ -211,7 +211,13 @@ async def test_a_turn_fails_without_a_retry_once_a_public_agent_turns_private(
     conversation = await Conversation.create(
         druks_db, account_id=other.id, body="Review this", agent_id=agent.id
     )
-    await agent.replace(druks_db, editor=owner, owner_id=owner.id, **{**AGENT, "is_private": True})
+    await agent.replace(
+        druks_db,
+        editor=owner,
+        owner_id=owner.id,
+        slack_channel_id=None,
+        **{**AGENT, "is_private": True},
+    )
     message = await conversation.get_unanswered_message(druks_db)
     await druks_db.commit()
 

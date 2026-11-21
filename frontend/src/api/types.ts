@@ -677,6 +677,7 @@ export interface ConfiguredAgentInput {
   model: string
   isPrivate: boolean
   ownerId: string
+  slackChannelId: string | null
 }
 
 export interface ConfiguredAgent extends ConfiguredAgentInput {

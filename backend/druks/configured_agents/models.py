@@ -30,6 +30,8 @@ class ConfiguredAgent(Model, Uuid7Pk):
     model: Mapped[str]
     owner_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
     is_private: Mapped[bool]
+    # A tag that names no agent in this Slack channel reaches this agent.
+    slack_channel_id: Mapped[str | None] = mapped_column(default=None, unique=True)
 
     @classmethod
     async def list_for_account(
@@ -56,6 +58,12 @@ class ConfiguredAgent(Model, Uuid7Pk):
         return await session.scalar(
             select(cls).where(sqlalchemy.func.lower(cls.name) == name.lower())
         )
+
+    @classmethod
+    async def get_for_slack_channel(
+        cls, session: AsyncSession, channel_id: str
+    ) -> "ConfiguredAgent | None":
+        return await session.scalar(select(cls).where(cls.slack_channel_id == channel_id))
 
     @classmethod
     async def get_for_text(cls, session: AsyncSession, text: str) -> "ConfiguredAgent | None":
@@ -123,11 +131,24 @@ class ConfiguredAgent(Model, Uuid7Pk):
         harness: str,
         model: str,
         is_private: bool,
+        slack_channel_id: str | None,
     ) -> None:
-        """Set every field. Only an admin changes the owner."""
+        """Set every field. Only an admin changes the owner or the Slack channel. Only a
+        public agent has a Slack channel: everyone there talks to it."""
         self.check_editor(editor)
         if owner_id != self.owner_id and not editor.is_admin:
             raise PermissionDenied("Only an admin can change an agent's owner.")
+        if slack_channel_id != self.slack_channel_id and not editor.is_admin:
+            raise PermissionDenied("Only an admin can change an agent's Slack channel.")
+        if slack_channel_id:
+            if is_private:
+                raise ValidationError(
+                    "Only a public agent can have a Slack channel: everyone there talks to it. "
+                    "An admin can remove the channel first."
+                )
+            other = await ConfiguredAgent.get_for_slack_channel(session, slack_channel_id)
+            if other and other.id != self.id:
+                raise ValidationError(f"The Slack channel already belongs to {other.name!r}.")
         other = await ConfiguredAgent.get_for_name(session, name)
         if other and other.id != self.id:
             raise ValidationError(f"An agent named {name!r} already exists.")
@@ -140,6 +161,7 @@ class ConfiguredAgent(Model, Uuid7Pk):
         self.harness = harness
         self.model = model
         self.is_private = is_private
+        self.slack_channel_id = slack_channel_id
         await session.flush()
 
     async def get_config(self, session: AsyncSession) -> AgentConfig:
