@@ -26,4 +26,5 @@ class BuildPromptContext:
     related_repos: list[ProjectRepo]
     skills: list[Skill]
     blockers: list[dict]
+    base_branch: str | None
     journal: BuildJournal

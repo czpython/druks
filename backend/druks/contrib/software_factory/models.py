@@ -290,7 +290,7 @@ class WorkItem(StoredSubject):
         )
         return (await db_session().scalars(statement)).first()
 
-    async def create_branch(self) -> None:
+    async def create_branch(self, *, base: str | None = None) -> None:
         """Create the attempt's branch, so the implementer starts on it and the
         ``pr.opened`` webhook finds this item. A name GitHub holds gets a number."""
         stem = f"agent/{self.ticket_key}"
@@ -302,7 +302,7 @@ class WorkItem(StoredSubject):
         while await github.has_branch(self.repo, branch):
             number += 1
             branch = f"{stem}-{number}"
-        await github.create_branch(self.repo, branch)
+        await github.create_branch(self.repo, branch, base=base)
         await self.update(branch=branch)
 
     async def start_attempt(self) -> None:

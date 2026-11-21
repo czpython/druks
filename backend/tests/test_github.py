@@ -178,6 +178,21 @@ async def test_create_branch_starts_at_the_head_of_the_default_branch() -> None:
     )
 
 
+async def test_create_branch_starts_at_the_head_of_a_given_base() -> None:
+    head = SimpleNamespace(parsed_data=SimpleNamespace(object_=SimpleNamespace(sha="def456")))
+    git = SimpleNamespace(async_get_ref=AsyncMock(return_value=head), async_create_ref=AsyncMock())
+    repos = SimpleNamespace(async_get=AsyncMock())
+    client = _TestGitHubClient(SimpleNamespace(rest=SimpleNamespace(repos=repos, git=git)))
+
+    await client.create_branch("ClawHaven/example", "agent/ACME-6", base="agent/ACME-5")
+
+    repos.async_get.assert_not_awaited()
+    git.async_get_ref.assert_awaited_once_with("ClawHaven", "example", "heads/agent/ACME-5")
+    git.async_create_ref.assert_awaited_once_with(
+        "ClawHaven", "example", ref="refs/heads/agent/ACME-6", sha="def456"
+    )
+
+
 def _merge_when_ready_client(
     *,
     state: str = "open",
