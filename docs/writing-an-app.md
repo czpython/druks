@@ -1170,11 +1170,33 @@ For a subject-backed decision inside the Druks dashboard, use:
 reply = await self.review(questions=report.questions, context=review_context)
 ```
 
-It offers `approve` and `request_changes`. Druks shows optional nonblank
-`context` next to the review. With this context, `request_changes` does not
-require answers or a note. Authors must treat that response as another pass and
-include the context. A subjectless workflow cannot use in-app review. A
-subjectless custom gate must override `on_wait()` to show the wait.
+It offers `approve` and `request_changes`. Druks shows the optional `context`
+next to the review. The context is text, or a list of `druks.ui` blocks:
+
+```python
+reply = await self.review(
+    context=[
+        ui.Facts([ui.Fact("Peers", len(report.peers)), ui.Fact("Stale", report.stale)]),
+        ui.Table(
+            columns=[ui.TableColumn("Peer"), ui.TableColumn("Answers", align="end")],
+            rows=[ui.TableRow([peer.name, peer.answers]) for peer in report.peers],
+        ),
+    ]
+)
+```
+
+The dashboard draws the blocks as a page draws them. An approval in Slack shows
+their [text forms](druks-ui.md#text-forms). `review` refuses a `Form`, an
+`Action`, or a `GateControls` anywhere in the blocks, because the operator acts
+through them and an approval is text. A `SubjectStatus` in the blocks shows where
+the work stands each time Druks reads the ask. The ask that Druks stores holds no
+status.
+
+Text that is not blank, or a list of one or more blocks, guides the next pass.
+With this context, `request_changes` does not require answers or a note. Authors
+must treat that response as another pass and include the context. A subjectless
+workflow cannot use in-app review. A subjectless custom gate must override
+`on_wait()` to show the wait.
 
 Without this
 override, Druks raises an error instead of a silent park.

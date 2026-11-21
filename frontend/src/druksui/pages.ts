@@ -41,6 +41,7 @@ export function fillPath(path: string, args: Record<string, string>): string {
 export function hrefForLink(link: Link, app: string, pages: PageEntry[]): string {
   if (link.url) return link.url
   if (link.subject) {
+    if (!app) return ''
     const subject = { type: link.subject.subjectType, id: link.subject.subjectId }
     return getAppUI(app)?.subjectPath?.(subject) ?? `/${app}/${subject.type}/${encodeURIComponent(subject.id)}`
   }

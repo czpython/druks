@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from inspect import Parameter, signature
 from itertools import count
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 from druks.apps.registry import pages
 
@@ -92,6 +93,16 @@ class PageRoute:
         child renders as a tab; a parameterized one is a detail page a Link reaches."""
         return "{" not in self.path
 
+    @property
+    def parameters(self) -> list[str]:
+        """The names of the route's parameters, in the order the route holds them."""
+        return [name for name, _ in _PARAMETER.findall(self.route)]
+
+    def get_path(self, arguments: dict[str, str]) -> str:
+        """The route with each parameter filled from ``arguments`` and encoded, as
+        the shell fills it."""
+        return _PARAMETER.sub(lambda match: quote(arguments[match[1]], safe=""), self.route)
+
     def check(self, app_name: str) -> None:
         """Everything this page decides on its own: its catch-all sits last, and
         it takes one required name-callable parameter for each parameter of its
@@ -104,9 +115,8 @@ class PageRoute:
                 "is not the last segment, so it would swallow every route under it. Put the "
                 "catch-all last."
             )
-        parameters = _PARAMETER.findall(self.route)
-        route_parameters = {name for name, _ in parameters}
-        if self.subject and len(parameters) != 1:
+        route_parameters = set(self.parameters)
+        if self.subject and len(self.parameters) != 1:
             raise PageRouteError(
                 f"page {self.name!r} declares a subject destination. "
                 "Use exactly one route parameter for its subject id."

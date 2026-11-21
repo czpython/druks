@@ -2,9 +2,11 @@ from types import SimpleNamespace
 from unittest import mock
 
 from conftest import connect_service
+from dbos import DBOS
+from druks import ui
 from druks.sandbox import SandboxSecret
 from druks.sandbox.layout import get_repo_root
-from druks.testing import run_workflow
+from druks.testing import run_workflow, seed_run
 from druks_field_notes.app import FieldNotes
 from druks_field_notes.contracts import GistOutput
 from druks_field_notes.models import Note, Repository
@@ -20,6 +22,45 @@ async def test_dispatch_starts_the_workflow_for_the_note(monkeypatch):
 
     assert run_id == "run-1"
     start.assert_awaited_once_with(subject=note)
+
+
+async def test_a_review_shows_its_facts_and_table_on_the_dashboard_and_in_the_approval(
+    druks_db, monkeypatch
+):
+    note = await Note.create(body="Fan noise on rack 3.")
+    run = await seed_run(druks_db, kind=Summarize.kind, subject=note)
+    workflow = Summarize()
+    workflow._workflow_id = run.id
+    workflow._subject = note.identity
+    shown = {}
+
+    async def call_through(options, function, *args, **kwargs):
+        return await function(*args, **kwargs)
+
+    async def answer(*args, **kwargs):
+        # What the dashboard and the approval read while the run waits.
+        await druks_db.refresh(run)
+        shown["ask"] = await run.get_ask()
+        shown["approval"] = await run.get_rendered_ask(has_chat=False)
+        return {"action": "approve"}
+
+    monkeypatch.setattr(DBOS, "run_step_async", call_through)
+    # The approval goes out from a queue of its own.
+    monkeypatch.setattr(DBOS, "enqueue_workflow_async", mock.AsyncMock())
+    monkeypatch.setattr(DBOS, "recv_async", answer)
+
+    reply = await workflow.review(
+        context=[
+            ui.Facts([ui.Fact("Body", note.body)]),
+            ui.Table(columns=[ui.TableColumn("Rack")], rows=[ui.TableRow(["3"])]),
+        ]
+    )
+
+    assert reply.action == "approve"
+    assert [block["block"] for block in shown["ask"]["context"]] == ["facts", "table"]
+    assert shown["approval"]["body"] == (
+        "# Review\n\n- **Body**: Fan noise on rack 3.\n\n| Rack |\n| --- |\n| 3 |"
+    )
 
 
 async def test_survey_writes_the_repository_gist(druks_db, monkeypatch):

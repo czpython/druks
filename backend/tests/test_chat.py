@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import asyncssh
 import pytest
+from druks import ui
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
 from druks.apps.registry import channels, services
@@ -65,6 +66,7 @@ from druks.testing import (
 from druks.user_settings.models import SettingsOverride
 from druks.workflows import Subject
 from druks_field_notes.app import FieldNotes
+from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic_core import to_json
@@ -1842,6 +1844,36 @@ async def test_the_next_message_carries_the_waiting_approval(druks_db, conversat
     ]
     assert [prompt["messageId"] for prompt in prompts] == [question.id]
     assert (approval.state, bool(approval.delivered_at)) == (MessageState.REPLIED, True)
+
+
+async def test_a_parked_run_asks_its_chat_with_its_blocks_and_where_their_work_stands(
+    druks_db, conversation
+):
+    note = await Note.create(body="Fan noise on rack 3.")
+    context = [ui.Facts([ui.Fact("Work", ui.SubjectStatus(note))])]
+    run = await seed_run(
+        druks_db,
+        kind=Summarize.kind,
+        subject=note,
+        state="parked",
+        input_gate="review",
+        input_request={
+            "presentation": "in_app",
+            "controls": [{"id": "approve", "note_required": False}],
+            "questions": [],
+            "context": [block.model_dump(mode="json", by_alias=True) for block in context],
+        },
+        account_id=conversation.account_id,
+    )
+    run.conversation_id = conversation.id
+
+    await bot_service.ask_for_answer(druks_db, run)
+
+    *_, ask = await list_messages(druks_db, conversation)
+    (facts,) = json.loads(ask.body.split("\n")[1])["context"]
+    value = facts["facts"][0]["value"]
+    assert value["subject"] == {"subjectType": "note", "subjectId": str(note.id)}
+    assert (value["status"]["run"], value["status"]["gate"]) == (run.id, "review")
 
 
 async def test_each_turn_opens_with_the_local_time(monkeypatch):

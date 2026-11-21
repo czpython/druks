@@ -23,7 +23,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship, selectinload
 
+from druks import ui
 from druks.accounts.models import Account
+from druks.apps.loader import get_app
 from druks.apps.registry import workflows
 from druks.chat.constants import POST_CANCEL_WORKFLOW
 from druks.core.models import Uuid7Pk
@@ -55,6 +57,7 @@ from druks.notifications.models import Notification
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 from druks.signals import publish
+from druks.ui.blocks import iter_parts, list_context_blocks
 
 if TYPE_CHECKING:
     from druks.sandbox.datastructures import AgentResult
@@ -423,11 +426,23 @@ class Run(Base):
         if ask.get("presentation") != "in_app":
             return ask
         artifact = await Artifact.get_latest_for_run(self.session, self.id)
-        return {
+        resolved_ask = {
             "label": f"Review: {artifact.title}" if artifact else "Review",
             "artifact_id": artifact.id if artifact else None,
             **ask,
         }
+        if blocks := list_context_blocks(ask.get("context", "")):
+            subjects = [
+                (part.subject.subject_type, part.subject.subject_id)
+                for part in iter_parts(blocks, ui.SubjectStatus)
+            ]
+            app = get_app(workflows.get(self.kind).app)
+            statuses = await app.get_statuses_for_subjects(self.session, subjects)
+            resolved_ask["context"] = [
+                block.model_dump(mode="json", by_alias=True, context={"statuses": statuses})
+                for block in blocks
+            ]
+        return resolved_ask
 
     async def get_rendered_ask(self, *, has_chat: bool) -> dict[str, Any]:
         # The parked ask as notification content. The body is the ask as
@@ -438,7 +453,17 @@ class Run(Base):
         ask = await self.get_ask()
         if ask["presentation"] == "in_app":
             sections = [f"# {ask['label']}"]
-            if context := ask.get("context"):
+            context = ask.get("context", "")
+            if blocks := list_context_blocks(context):
+                app = get_app(workflows.get(self.kind).app)
+                pages = app.pages()
+                endpoint = get_settings().urls.endpoint.rstrip("/")
+                markdown = (
+                    block.to_markdown(app=app.name, pages=pages, endpoint=endpoint)
+                    for block in blocks
+                )
+                context = "\n\n".join(filter(None, markdown))
+            if context:
                 sections.append(context)
             for question in ask["questions"]:
                 lines = [question["prompt"]]

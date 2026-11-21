@@ -1,7 +1,8 @@
 import { useEffect, useId, useState } from 'react'
 
 import { api } from '../api/client'
-import type { ArtifactContent, InputRequest } from '../api/types'
+import type { ArtifactContent, Block, InputRequest } from '../api/types'
+import { Blocks } from '../druksui/Blocks'
 import { Markdown } from './Markdown'
 
 export function CancelRun({ runId }: { runId: string }) {
@@ -117,7 +118,10 @@ export function InAppReview({
   const [note, setNote] = useState('')
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const critique = ask.context?.trim() ?? ''
+  let critique = ''
+  let blocks: Block[] = []
+  if (typeof ask.context === 'string') critique = ask.context.trim()
+  else if (ask.context) blocks = ask.context
 
   // Installed apps can mount this component without a QueryClientProvider.
   const [fetched, setFetched] = useState<{ id: string; content: ArtifactContent } | null>(null)
@@ -175,6 +179,11 @@ export function InAppReview({
         <div className="review-artifact">
           <div className="review-artifact-title">Critique</div>
           <Markdown source={critique} />
+        </div>
+      )}
+      {blocks.length > 0 && (
+        <div className="review-artifact">
+          <Blocks blocks={blocks} />
         </div>
       )}
       {artifact && (

@@ -101,6 +101,8 @@ from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 from druks.signals import publish
 from druks.teams.models import Team
+from druks.ui.blocks import Block, Interactive, iter_parts, list_context_blocks
+from druks.ui.exceptions import NoTextFormError
 from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
 
@@ -406,7 +408,10 @@ async def _park(
         if action := gate.model_fields.get("action"):
             # A request for changes needs a note to guide the next pass, unless the ask
             # carries its own context. Every place that takes an answer reads this.
-            is_guided = bool((input_request.get("context") or "").strip())
+            context = input_request.get("context")
+            is_guided = bool(context)
+            if isinstance(context, str):
+                is_guided = bool(context.strip())
             input_request["controls"] = [
                 {"id": control, "note_required": control == "request_changes" and not is_guided}
                 for control in input_request.get("controls", get_args(action.annotation))
@@ -1032,7 +1037,7 @@ class Workflow:
         )
 
     async def review(
-        self, *, questions: list[BaseModel] | None = None, context: str = ""
+        self, *, questions: list[BaseModel] | None = None, context: str | list[Block] = ""
     ) -> OperatorReply:
         # Park for an in-app decision: the ask carries the controls, any
         # questions, and optional context (rendered beside the reviewed
@@ -1049,7 +1054,13 @@ class Workflow:
             "presentation": "in_app",
             "questions": [q.model_dump(mode="json") for q in questions or ()],
         }
-        if context:
+        blocks = list_context_blocks(context)
+        # A notice writes the context as text, so every part of it needs a text form.
+        if refused_part := next(iter_parts(blocks, Interactive), None):
+            raise NoTextFormError(type(refused_part).__name__)
+        if blocks:
+            request["context"] = [block.model_dump(mode="json", by_alias=True) for block in blocks]
+        elif context:
             request["context"] = context
         reply = await _park(self, OperatorReply, request, GATE_TTL_SECONDS)
         self.journal.add(reply)

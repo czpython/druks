@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from druks.agents import Agent, Bot
     from druks.doctor import CheckResult
     from druks.durable.datastructures import Subject
-    from druks.durable.schemas import SubjectSummary
+    from druks.durable.schemas import SubjectStatus, SubjectSummary
     from druks.ui import Page
     from druks.ui.page import PageRoute
     from druks.workflows import Workflow
@@ -238,6 +238,16 @@ class App:
             for workflow in workflow_registry.all()
             if workflow.__module__.startswith(prefix)
         ]
+
+    @classmethod
+    async def get_statuses_for_subjects(
+        cls, session: AsyncSession, identities: list[tuple[str, str]]
+    ) -> "dict[tuple[str, str], SubjectStatus]":
+        """Where the work on each ``(subject_type, subject_id)`` stands, from the runs
+        of this app alone."""
+        from druks.durable import reads
+
+        return await reads.get_statuses_for_subjects(session, identities, workflows=cls.workflows())
 
     @classmethod
     def subjects(cls) -> "list[type[Subject] | type[StoredSubject]]":
@@ -569,7 +579,6 @@ class App:
         work on each of its subjects stands, from one read."""
         from fastapi.responses import JSONResponse
 
-        from druks.durable import reads
         from druks.ui import Action, EmptyState, GateControls, Link, Page, SubjectStatus
 
         controls = []
@@ -601,9 +610,7 @@ class App:
                 (part.subject.subject_type, part.subject.subject_id)
                 for part in page.iter_parts(SubjectStatus, GateControls)
             ]
-            statuses = await reads.get_statuses_for_subjects(
-                db_session(), subjects, workflows=cls.workflows()
-            )
+            statuses = await cls.get_statuses_for_subjects(db_session(), subjects)
             return JSONResponse(
                 page.model_dump(mode="json", by_alias=True, context={"statuses": statuses})
             )

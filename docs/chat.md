@@ -193,7 +193,10 @@ denies the file, shell, and web tools.
 A run that the agent starts with a tool records its conversation. When the run
 parks with a question, Druks adds an internal message with the request to that
 conversation, except on a WhatsApp number with an admin, where the admin answers
-instead (see [Confirmation](#confirmation)). In a Slack conversation, a run
+instead (see [Confirmation](#confirmation)). The request is the ask as JSON, as
+`get_gate` gives it. A review's context is text, or the JSON of its
+[blocks](druks-ui.md#text-forms). Druks reads each subject status in the blocks
+when it writes the message. In a Slack conversation, a run
 that waits for an answer in the dashboard also gets the question in the thread or direct
 message, with a button for each choice. Only the person who started the run can click
 them. The question with its buttons is the only message that you get about it. Druks

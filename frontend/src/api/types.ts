@@ -145,8 +145,8 @@ export interface InputRequest {
   controls?: AskControl[]
   questions?: AskQuestion[]
   artifact_id?: string | null
-  /** Workflow-declared prose rendered beside the reviewed document. */
-  context?: string
+  /** Workflow-declared prose or blocks, rendered beside the reviewed document. */
+  context?: string | Block[]
   /** The reply fields the gate declares. */
   reply_fields?: string[]
 }
@@ -323,7 +323,7 @@ export interface SubjectStatusValue {
   value: 'subject_status'
   subject: Follows
   working: string
-  status: SubjectStatus
+  status?: SubjectStatus
 }
 
 export interface ControlsValue {

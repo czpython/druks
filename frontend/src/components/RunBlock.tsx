@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { subjectApi } from '../api/client'
 import type { RunSummary } from '../api/types'
+import { AppPagesProvider } from '../druksui/AppPage'
 import { GateControls } from '../druksui/GateControls'
 import { httpUrl, relTimeFromIso } from '../lib/format'
 import { isActiveRun } from '../lib/states'
@@ -48,7 +49,9 @@ export function RunBlock({
         {run.state === 'failed' && newest && <RetryRun runId={run.id} onRetried={onRetried} />}
       </div>
       {ask?.presentation !== 'external' && (expected || ask?.presentation === 'in_app') && (
-        <GateControls run={run.id} expected={expected} />
+        <AppPagesProvider app={run.app}>
+          <GateControls run={run.id} expected={expected} />
+        </AppPagesProvider>
       )}
       {ask?.presentation === 'external' && (
         <div className="ins-needs">

@@ -11,6 +11,7 @@ from conftest import (
     seed_note_agent_run,
     seed_note_run,
 )
+from druks import ui
 from druks.accounts.models import Account
 from druks.api import runs
 from druks.api.exceptions import (
@@ -147,6 +148,20 @@ async def test_get_gate_serves_the_artifact(druks_db):
     assert view.artifact.call_id == call.id
     assert view.artifact.title == "Plan"
     assert len(view.artifact.content.encode()) <= 4096
+
+
+async def test_get_gate_serves_a_block_context_with_where_its_work_stands(druks_db):
+    item = await make_test_note()
+    context = [ui.Facts([ui.Fact("Work", ui.SubjectStatus(item))])]
+    stored = [block.model_dump(mode="json", by_alias=True) for block in context]
+    run = await _park(druks_db, item, ask={**_in_app_ask(), "context": stored})
+
+    view = await services.get_gate(db_session(), run.id)
+
+    (facts,) = view.model_dump(mode="json", by_alias=True)["ask"]["context"]
+    value = facts["facts"][0]["value"]
+    assert value["subject"] == {"subjectType": "note", "subjectId": str(item.id)}
+    assert (value["status"]["run"], value["status"]["gate"]) == (run.id, "review")
 
 
 async def test_get_gate_refuses_when_not_parked(druks_db):

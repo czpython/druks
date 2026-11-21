@@ -17,6 +17,7 @@ import type {
 import { DetailLayout } from '../../components/DetailLayout'
 import { queryGate } from '../../components/QueryGate'
 import { CancelRun, RetryRun } from '../../components/RunControls'
+import { AppPagesProvider } from '../../druksui/AppPage'
 import { GateControls } from '../../druksui/GateControls'
 import { RunTranscript } from '../../components/RunTranscript'
 import { FilePane } from './AgentCallPage'
@@ -661,7 +662,9 @@ function RunInspector({
         <RunFailure run={run} />
         <RunNeedsInput run={run} prUrl={data.summary.links.pr} />
         {showReview ? (
-          <GateControls run={run.id} expected={expected} />
+          <AppPagesProvider app={run.app}>
+            <GateControls run={run.id} expected={expected} />
+          </AppPagesProvider>
         ) : showResult ? (
           <FilePane
             url={subjectApi.transcriptFile(run.app, call.id, artifact.name)}
