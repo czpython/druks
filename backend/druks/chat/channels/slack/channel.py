@@ -11,7 +11,7 @@ from druks.accounts.models import Account
 from druks.apps.loader import iter_apps
 from druks.chat.channels.base import Channel
 from druks.chat.enums import ConversationSource
-from druks.chat.exceptions import ChannelHasNoThreadsError, FileNotInThreadError
+from druks.chat.exceptions import ChannelHasNoThreadsError, FileNotInThreadError, FormError
 from druks.chat.models import Automation, Conversation, Message
 from druks.chat.service import deliver
 from druks.core.apis.slack import SlackClient
@@ -20,17 +20,27 @@ from druks.files.datastructures import File
 from druks.models import Base
 from druks.notifications.constants import CLOSED_MESSAGE, MARKDOWN_TEXT_LIMIT
 from druks.notifications.delivery import deliver as deliver_notification
-from druks.notifications.models import Notification
+from druks.notifications.delivery import get_blocks
+from druks.notifications.models import Notification, mint_correlation_token
 from druks.prompts import render_prompt
 from druks.redis import get_client
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 
 from .constants import (
+    BLOCK_ID_LIMIT,
+    HINT_LIMIT,
+    INITIAL_VALUE_LIMIT,
     JOINED_THREAD_SECONDS,
+    LABEL_LIMIT,
     LINK_KEY,
     LINK_MESSAGE,
     LINK_TTL_SECONDS,
+    MESSAGE_BLOCKS_LIMIT,
+    OPTION_TEXT_LIMIT,
+    OPTION_VALUE_LIMIT,
+    OPTIONS_LIMITS,
+    PLACEHOLDER_LIMIT,
     THREAD_MESSAGES,
     UNACCEPTED_AUTOMATION_REPLY,
     UNLINKED_REPLY,
@@ -55,6 +65,7 @@ class SlackChannel(Channel):
     service = Slack
     has_readable_threads = True
     has_buttons = True
+    has_inputs = True
     reaction_ack = "eyes"
 
     @classmethod
@@ -234,23 +245,65 @@ class SlackChannel(Channel):
         await session.commit()
 
     @classmethod
+    def validate_fields(cls, fields: list[dict]) -> None:
+        """Refuse fields whose message Slack refuses: more blocks than one message holds, or
+        a name, a text, or options past their Slack limits. The check reads the blocks that
+        delivery posts. A field's name is the id of its block."""
+        blocks = get_blocks("", fields=fields, token=mint_correlation_token())
+        if len(blocks) > MESSAGE_BLOCKS_LIMIT:
+            raise FormError(
+                f"A Slack message holds {MESSAGE_BLOCKS_LIMIT} blocks: the question, an input "
+                f"for each field, and the Submit button. Ask {MESSAGE_BLOCKS_LIMIT - 2} fields "
+                "or fewer."
+            )
+        # The inputs come between the question and the Submit button.
+        for block in blocks[1:-1]:
+            name, element = block["block_id"], block["element"]
+            options = element.get("options", [])
+            if len(options) > OPTIONS_LIMITS[element["type"]]:
+                raise FormError(
+                    f"Field {name!r} has {len(options)} options. Slack shows "
+                    f"{OPTIONS_LIMITS[element['type']]} at most in this field."
+                )
+            texts = [
+                ("name", name, BLOCK_ID_LIMIT),
+                ("label", block["label"]["text"], LABEL_LIMIT),
+            ]
+            if hint := block.get("hint"):
+                texts.append(("help text", hint["text"], HINT_LIMIT))
+            if placeholder := element.get("placeholder"):
+                texts.append(("placeholder", placeholder["text"], PLACEHOLDER_LIMIT))
+            if "initial_value" in element:
+                texts.append(("value", element["initial_value"], INITIAL_VALUE_LIMIT))
+            for option in options:
+                texts.append(("option label", option["text"]["text"], OPTION_TEXT_LIMIT))
+                texts.append(("option value", option["value"], OPTION_VALUE_LIMIT))
+            for part, text, limit in texts:
+                if not 0 < len(text) <= limit:
+                    raise FormError(
+                        f"Slack takes 1 to {limit} characters for the {part} of a field. The "
+                        f"{part} of field {name!r} has {len(text)}."
+                    )
+
+    @classmethod
     async def post_buttons(
         cls, session: AsyncSession, conversation: Conversation, notification: Notification
     ) -> str:
         """Post the notification in the conversation's thread, or its DM. A notification
         that an answer closed before the post says that its question is closed, in place
-        of its buttons."""
+        of its buttons and inputs."""
         client = SlackClient(token=await Slack.get_bot_token())
         room, _, thread_ts = conversation.thread_id.partition(":")
-        actions, outcome = notification.actions, ""
+        actions, fields, outcome = notification.actions, notification.fields, ""
         if notification.is_acknowledged:
-            actions, outcome = None, CLOSED_MESSAGE
+            actions, fields, outcome = None, None, CLOSED_MESSAGE
         posted = await deliver_notification(
             client,
             room or conversation.user_id,
             notification.body,
             thread_ts=thread_ts,
             actions=actions,
+            fields=fields,
             token=notification.correlation_token,
             deep_link=notification.deep_link,
             outcome=outcome,

@@ -4,13 +4,14 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from conftest import install_service
+from conftest import FORM_TEXT, install_service
 from dbos import DBOS
 from druks.accounts.context import current_conversation_id
 from druks.accounts.models import Account
 from druks.apps.registry import workflows
 from druks.chat.channels.slack import channel as slack_channel
 from druks.chat.enums import ConversationSource, MessageRole, MessageState
+from druks.chat.forms import parse_fields
 from druks.chat.models import Conversation, Message
 from druks.core.services import Slack
 from druks.core.webhooks import slack as slack_webhooks
@@ -244,6 +245,7 @@ class _DeliverSpy:
         message_ts="",
         user="",
         actions=None,
+        fields=None,
         token=None,
         deep_link=None,
         outcome="",
@@ -258,6 +260,7 @@ class _DeliverSpy:
                 "user": user,
                 "body": body,
                 "actions": actions,
+                "fields": fields,
                 "token": token,
                 "deep_link": deep_link,
                 "outcome": outcome,
@@ -1101,8 +1104,13 @@ async def test_a_park_notifies_the_run_s_account_by_its_channel(rt, deliver_spy)
     assert call["channel"] == "C-explicit"
 
 
-async def _create_question(user_id: str) -> Notification:
-    """A question that a Slack chat's agent asked, as its turn left it."""
+CHOICES = {"actions": [{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}]}
+FORM = {"fields": parse_fields(FORM_TEXT)}
+
+
+async def _create_question(user_id: str, ask: dict) -> Notification:
+    """A question that a Slack chat's agent asked, as its turn left it: with choices, or
+    with the fields of a form."""
     await _install_slack()
     account = await Account.get_default(db_session())
     conversation = Conversation(
@@ -1119,15 +1127,15 @@ async def _create_question(user_id: str) -> Notification:
         reason="question.asked",
         body="I read both.\n\nWhich database?",
         question_offset=12,
-        actions=[{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}],
+        **ask,
     )
 
 
-async def _ask(rt, user_id: str) -> Notification:
+async def _ask(rt, user_id: str, ask: dict) -> Notification:
     """The question and its queued send, as the turn that asked commits them."""
 
     async def create():
-        question = await _create_question(user_id)
+        question = await _create_question(user_id, ask)
         await outbox.queue_send(db_session(), question)
         return question
 
@@ -1157,11 +1165,12 @@ async def _wait_workflow(rt, workflow_id: str, statuses=("SUCCESS", "ERROR")) ->
     raise AssertionError(f"workflow {workflow_id} is still {status}")
 
 
+@pytest.mark.parametrize("ask", [CHOICES, FORM], ids=["choices", "form"])
 async def test_a_question_that_an_answer_closed_in_the_queue_posts_its_reply_closed(
-    rt, deliver_spy
+    rt, deliver_spy, ask
 ):
     async def create():
-        question = await _create_question("U21")
+        question = await _create_question("U21", ask)
         await outbox.close_questions(db_session(), question.conversation_id)
         await outbox.queue_send(db_session(), question)
         return question
@@ -1177,14 +1186,15 @@ async def test_a_question_that_an_answer_closed_in_the_queue_posts_its_reply_clo
         "I read both.\n\nWhich database?",
         12,
     )
-    assert (posted["actions"], posted["outcome"]) == (None, CLOSED_MESSAGE)
+    assert (posted["actions"], posted["fields"], posted["outcome"]) == (None, None, CLOSED_MESSAGE)
 
 
+@pytest.mark.parametrize("ask", [CHOICES, FORM], ids=["choices", "form"])
 async def test_an_answer_while_a_question_posts_takes_its_buttons_off_after_the_post(
-    rt, deliver_spy
+    rt, deliver_spy, ask
 ):
     deliver_spy.hold = asyncio.Event()
-    question = await _ask(rt, "U22")
+    question = await _ask(rt, "U22", ask)
     deadline = asyncio.get_event_loop().time() + 30
     while not deliver_spy.calls:
         assert asyncio.get_event_loop().time() < deadline, "the question never posted"
@@ -1200,17 +1210,22 @@ async def test_an_answer_while_a_question_posts_takes_its_buttons_off_after_the_
     done = await _snapshot(rt, question.id)
     posted, closed = deliver_spy.calls
     assert (done["state"], done["message_id"]) == ("acknowledged", "C9:1700000000.000001")
-    assert (posted["actions"], posted["question_offset"]) == (question.actions, 12)
-    assert (closed["message_ts"], closed["outcome"], closed["actions"]) == (
+    assert (posted["actions"], posted["fields"], posted["question_offset"]) == (
+        question.actions,
+        question.fields,
+        12,
+    )
+    assert (closed["message_ts"], closed["outcome"], closed["actions"], closed["fields"]) == (
         "1700000000.000001",
         CLOSED_MESSAGE,
+        None,
         None,
     )
     assert closed["question_offset"] == 12
 
 
 async def test_a_refused_edit_leaves_the_question_closed_and_retries_nothing(rt, deliver_spy):
-    question = await _ask(rt, "U24")
+    question = await _ask(rt, "U24", CHOICES)
     await _wait_for(rt, question.id, lambda s: s["state"] == "delivered")
     deliver_spy.always_fail = True
 

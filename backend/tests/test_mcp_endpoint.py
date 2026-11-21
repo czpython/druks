@@ -244,8 +244,15 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
     )
     reason = tools["cancel_run"].input_schema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
-    choices = tools["chat_ask"].input_schema["properties"]["choices"]
+    ask = tools["chat_ask"]
+    choices = ask.input_schema["properties"]["choices"]
     assert (choices["minItems"], choices["maxItems"]) == (2, 4)
+    assert ask.input_schema["required"] == ["question"]
+    assert ask.input_schema["properties"]["fields"]["type"] == "string"
+    assert (
+        '[TextField(name="title", label="Title"), SelectField(name="where", label="Where", '
+        'options=[Option("Staging", value="staging")])]'
+    ) in " ".join(ask.description.split())
     assert tools["software_factory_start"].input_schema["properties"]["ticket"]["description"] == (
         "The tracker's ticket key, e.g. ENG-831, or owner/repo#12 for GitHub."
     )
@@ -678,6 +685,7 @@ async def test_every_tool_failure_answers_the_agent_route_shape(app, pat_token):
         unasked = await _call_error(
             client, "chat_ask", {"question": "Which one?", "choices": ["Only one"]}
         )
+        unanswerable = await _call_error(client, "chat_ask", {"question": "Which one?"})
     assert invalid == {
         "code": "INVALID_TOOL_ARGUMENTS",
         "message": (
@@ -702,6 +710,11 @@ async def test_every_tool_failure_answers_the_agent_route_shape(app, pat_token):
     assert unasked == {
         "code": "VALIDATION_ERROR",
         "message": "choices: List should have at least 2 items after validation, not 1",
+        "retryable": False,
+    }
+    assert unanswerable == {
+        "code": "HTTP_422",
+        "message": "Give choices or fields. Give only one of them.",
         "retryable": False,
     }
 

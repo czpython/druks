@@ -47,6 +47,18 @@ for test_module in ("test_durable_sdk", "test_notifications_durable"):
 
 IDENTITY_HEADER = "X-ExeDev-Email"
 MANAGER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+FORM_TEXT = (
+    '[TextField(name="title", label="Title", is_required=True, placeholder="A short title"), '
+    'TextAreaField(name="notes", label="Notes", help_text="Anything else to know."), '
+    'NumberField(name="budget", label="Budget", minimum=0, maximum=100, step=5, value=10), '
+    'SelectField(name="where", label="Where", options=[Option("Staging", value="staging"), '
+    'Option("Production", value="production")], value="staging"), '
+    'MultiSelectField(name="tags", label="Tags", options=[Option("Rack", value="rack"), '
+    'Option("Shelf", value="shelf")], value=["rack"]), '
+    'RadioField(name="size", label="Size", is_required=True, options=[Option("Small", '
+    'value="s"), Option("Large", value="l")]), '
+    'CheckboxField(name="notify", label="Notify the owner", value=True)]'
+)
 _MANAGER_JWKS = {
     "keys": [
         {

@@ -3,23 +3,30 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from conftest import FORM_TEXT
 from druks.accounts.models import Account
 from druks.chat.bots.service import request_approval
 from druks.chat.constants import CLICK_ANSWER_MESSAGE
 from druks.chat.enums import ConversationSource, MessageRole
+from druks.chat.forms import parse_fields
 from druks.chat.models import Conversation, Message
 from druks.chat.service import deliver
 from druks.contrib.software_factory.workflows import Build
 from druks.durable import Run
 from druks.models import Base
-from druks.notifications.exceptions import AnswerNotAllowedError, InvalidChoiceError
+from druks.notifications.datastructures import NotificationState
+from druks.notifications.exceptions import (
+    AlreadyAcknowledgedError,
+    AnswerNotAllowedError,
+    InvalidChoiceError,
+)
 from druks.notifications.models import Notification
 from druks.notifications.services import respond_to_notification
 from druks.teams.models import Team
 from druks.testing import configure_app_for_test, make_settings, seed_dbos_status, seed_run
 from druks_field_notes.workflows import Summarize
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from uuid_utils import uuid7
 
@@ -340,9 +347,22 @@ async def test_a_click_that_needs_more_goes_to_the_chat(
     started.assert_awaited_once_with(deliver, run.conversation_id)
 
 
-async def _question_notification(druks_db, *, person="U1"):
+CHOICES = {"actions": [{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}]}
+FORM = {"fields": parse_fields(FORM_TEXT)}
+ANSWERS = {
+    "title": " Fix the build ",
+    "notes": "",
+    "budget": "15",
+    "where": "production",
+    "tags": ["shelf", "rack"],
+    "size": "l",
+    "notify": False,
+}
+
+
+async def _question_notification(druks_db, *, person="U1", ask=CHOICES):
     """A question that the agent of a Slack chat with ``person`` asked, as its turn left
-    it."""
+    it: with choices, or with the fields of a form."""
     account = await Account.get_or_create(druks_db, "op@example.com")
     conversation = Conversation(
         account_id=account.id,
@@ -358,8 +378,18 @@ async def _question_notification(druks_db, *, person="U1"):
         reason="question.asked",
         body="Which database?",
         question_offset=0,
-        actions=[{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}],
+        **ask,
     )
+
+
+async def _list_messages(druks_db, question) -> list:
+    """The messages of the question's chat: body, whether Druks wrote it, and state."""
+    messages = await druks_db.execute(
+        select(Message.body, Message.is_internal, Message.state).where(
+            Message.conversation_id == question.conversation_id
+        )
+    )
+    return messages.all()
 
 
 @pytest.fixture
@@ -420,6 +450,150 @@ async def test_a_chat_without_a_run_takes_only_a_choice_that_its_question_offere
         )
 
     assert not question.is_acknowledged
+    started.assert_not_awaited()
+
+
+async def _submit(druks_db, question, values, *, person="U1"):
+    """The Submit of the form ``question`` by ``person``, with ``values`` in its inputs."""
+    return await respond_to_notification(
+        druks_db,
+        question.correlation_token,
+        {"control": "submit"},
+        user_id=person,
+        account_id=None,
+        values=values,
+    )
+
+
+@pytest.mark.parametrize(
+    ("values", "body"),
+    [
+        (
+            ANSWERS,
+            "Title: Fix the build\nNotes: (no answer)\nBudget: 15\nWhere: Production\n"
+            "Tags: Rack, Shelf\nSize: Large\nNotify the owner: No",
+        ),
+        (
+            {"title": "Fix it", "size": "s", "notify": True},
+            "Title: Fix it\nNotes: (no answer)\nBudget: (no answer)\nWhere: (no answer)\n"
+            "Tags: (no answer)\nSize: Small\nNotify the owner: Yes",
+        ),
+    ],
+    ids=["every-field", "the-required-fields"],
+)
+async def test_a_submit_by_the_person_is_their_next_message_with_a_line_for_each_field(
+    druks_db, started, values, body
+):
+    question = await _question_notification(druks_db, ask=FORM)
+
+    await _submit(druks_db, question, values)
+
+    assert question.is_acknowledged
+    assert await _list_messages(druks_db, question) == [(body, False, "pending")]
+    started.assert_awaited_once_with(deliver, question.conversation_id)
+
+
+BUDGET_REFUSAL = 'Write a number in "Budget". The minimum is 0. The maximum is 100. The step is 5.'
+
+
+@pytest.mark.parametrize(
+    ("fields", "values", "reason"),
+    [
+        (FORM_TEXT, {**ANSWERS, "title": "  "}, 'Answer "Title".'),
+        (FORM_TEXT, {**ANSWERS, "size": ""}, 'Answer "Size".'),
+        (FORM_TEXT, {**ANSWERS, "budget": "a lot"}, BUDGET_REFUSAL),
+        (FORM_TEXT, {**ANSWERS, "budget": "nan"}, BUDGET_REFUSAL),
+        (FORM_TEXT, {**ANSWERS, "budget": "105"}, BUDGET_REFUSAL),
+        (FORM_TEXT, {**ANSWERS, "budget": "12"}, BUDGET_REFUSAL),
+        (FORM_TEXT, {**ANSWERS, "where": "moon"}, 'Choose "Where" from its options.'),
+        (FORM_TEXT, {**ANSWERS, "tags": ["shelf", "moon"]}, 'Choose "Tags" from its options.'),
+        (
+            '[CheckboxField(name="terms", label="I agree", is_required=True)]',
+            {"terms": False},
+            'Check "I agree".',
+        ),
+    ],
+    ids=[
+        "blank-text",
+        "no-choice",
+        "not-a-number",
+        "not-a-finite-number",
+        "above-the-maximum",
+        "off-the-step",
+        "unknown-option",
+        "unknown-options",
+        "unchecked-box",
+    ],
+)
+async def test_a_submit_that_its_fields_refuse_leaves_the_form_open(
+    druks_db, started, fields, values, reason
+):
+    question = await _question_notification(druks_db, ask={"fields": parse_fields(fields)})
+
+    with pytest.raises(InvalidChoiceError) as refused:
+        await _submit(druks_db, question, values)
+
+    assert str(refused.value) == reason
+    assert not question.is_acknowledged
+    assert await _list_messages(druks_db, question) == []
+    started.assert_not_awaited()
+
+
+async def test_a_person_corrects_a_refused_submit_and_submits_again(druks_db, started):
+    question = await _question_notification(druks_db, ask=FORM)
+
+    with pytest.raises(InvalidChoiceError):
+        await _submit(druks_db, question, {**ANSWERS, "budget": "a lot"})
+    await _submit(druks_db, question, ANSWERS)
+
+    assert question.is_acknowledged
+    assert len(await _list_messages(druks_db, question)) == 1
+    started.assert_awaited_once_with(deliver, question.conversation_id)
+
+
+async def test_a_submit_by_another_person_answers_nothing(druks_db, started):
+    question = await _question_notification(druks_db, ask=FORM)
+
+    with pytest.raises(AnswerNotAllowedError):
+        await _submit(druks_db, question, ANSWERS, person="U2")
+
+    assert not question.is_acknowledged
+    assert await _list_messages(druks_db, question) == []
+    started.assert_not_awaited()
+
+
+@pytest.mark.parametrize("is_seen", [True, False], ids=["closed-before", "claimed-meanwhile"])
+async def test_a_submit_after_another_answer_creates_no_message(druks_db, started, is_seen):
+    question = await _question_notification(druks_db, ask=FORM)
+    # Another answer took the form, before this Submit read it or while it checked it.
+    await druks_db.execute(
+        update(Notification)
+        .where(Notification.id == question.id)
+        .values(state=NotificationState.ACKNOWLEDGED.value),
+        execution_options={"synchronize_session": "evaluate" if is_seen else False},
+    )
+
+    with pytest.raises(AlreadyAcknowledgedError):
+        await _submit(druks_db, question, ANSWERS)
+
+    assert await _list_messages(druks_db, question) == []
+    started.assert_not_awaited()
+
+
+async def test_the_respond_route_answers_no_form(tmp_path, druks_db, started):
+    question = await _question_notification(druks_db, ask=FORM)
+    client = TestClient(configure_app_for_test(settings=make_settings(tmp_path)))
+
+    response = client.post(
+        f"/_external/notifications/{question.correlation_token}/respond",
+        json={"control": "submit", "answers": {"title": "Fix the build"}},
+    )
+
+    assert response.status_code == 403
+    assert (await druks_db.get(Notification, question.id, populate_existing=True)).state == (
+        "pending"
+    )
+    assert await _list_messages(druks_db, question) == []
     started.assert_not_awaited()
 
 

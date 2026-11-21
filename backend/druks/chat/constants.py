@@ -83,3 +83,23 @@ TRANSCRIPTION_FAILED_MESSAGE = (
     "[Internal: Druks could not turn the person's voice note into text. Tell the person "
     "in one short line to write it instead.]"
 )
+FIELDS_TEXT_LIMIT = 20_000
+# The list, a field, its options, an option, and its literals.
+FIELDS_DEPTH_LIMIT = 5
+REFUSED_FIELDS = {
+    "SecretField": (
+        "A form takes no SecretField. A secret that a person types in Slack stays in Slack. "
+        "Do not ask for a secret in a chat."
+    ),
+    "UploadField": (
+        "A form takes no UploadField. Slack shows a file input only in a modal, and a form "
+        "is a message. Ask the person to send the file in the chat."
+    ),
+    "MultiUploadField": (
+        "A form takes no MultiUploadField. Slack shows a file input only in a modal, and a "
+        "form is a message. Ask the person to send the files in the chat."
+    ),
+}
+CHECKED_ANSWER = "Yes"
+UNCHECKED_ANSWER = "No"
+EMPTY_ANSWER = "(no answer)"
