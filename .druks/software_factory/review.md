@@ -120,5 +120,20 @@ of the fields that share a type, change the type, so every field gets it. Leave 
 field out only when the ticket says why. A doc line such as "`List` takes no
 short form" is the caveat that shows you did not.
 
+Channel code lives in its channel. A channel's limits, message layout, block types
+and API calls go in that channel's files: `backend/druks/chat/channels/<channel>/`,
+`backend/druks/core/apis/<provider>.py`, `backend/druks/core/webhooks/<provider>.py`,
+and `backend/druks/notifications/delivery.py` for Slack's delivery of a notice. These
+files hold no channel code: `backend/druks/durable/models.py`,
+`backend/druks/workflows.py`, `backend/druks/notifications/models.py`,
+`backend/druks/chat/service.py` and `backend/druks/chat/channels/base.py`. Examples:
+
+- Slack's 12,000-character limit for markdown, and the cut that keeps a message under
+  it, go in `notifications/delivery.py`, not in `Run.get_rendered_ask`.
+- Slack puts a notice's link on a line of its own after the text. That is the layout
+  of `deliver()`, so a run writes only the ask and does not budget for the link.
+- A Slack block type (`markdown`, `section`, `actions`) and Slack's mrkdwn syntax
+  appear only in Slack's files.
+
 Before you report done: read every file you touched end to end, not the diff. If
 any line makes you wince, that's the finding — fix it or say it out loud.
