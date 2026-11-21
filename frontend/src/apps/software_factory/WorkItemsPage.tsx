@@ -9,14 +9,11 @@ import { PRCell } from '../../components/PRCell'
 import { RepoCell } from '../../components/RepoCell'
 import { TicketCell } from '../../components/TicketCell'
 import { relTime, secondsSince, updatedAtSortKey } from '../../lib/format'
+import { isInFlight, splitLanes } from './lanes'
 import { statusLine } from './statusLine'
 import { workItemPathFromSummary } from './slug'
 import '../../operations.css'
 
-
-function isInFlight(row: WorkItemRow): boolean {
-  return row.status.state === 'running' || row.status.state === 'scheduled'
-}
 
 function matchesQuery(row: WorkItemRow, q: string): boolean {
   if (!q.trim()) return true
@@ -120,15 +117,14 @@ export function WorkItemsPage() {
     )
   }
 
-  // Two lanes that partition the board: a step is live, or the item is waiting on
-  // the operator — parked, failed, cancelled, or finished with its PR still open.
-  // Newest movement first.
+  // Three lanes that partition the board: a step is live, the item is waiting on
+  // the operator (parked, failed, cancelled, or finished with its PR still open),
+  // or no run has started yet. Newest movement first.
   const active = [...rows].sort(
     (a, b) => updatedAtSortKey(b.summary) - updatedAtSortKey(a.summary),
   )
   const matched = active.filter((row) => matchesQuery(row, query))
-  const inFlight = matched.filter(isInFlight)
-  const needsYou = matched.filter((row) => !isInFlight(row))
+  const { needsYou, inFlight, notStarted } = splitLanes(matched)
   const total = matched.length
 
   const head = (
@@ -140,6 +136,8 @@ export function WorkItemsPage() {
           <span>{needsYou.length} needs you</span>
           <span>·</span>
           <span>{inFlight.length} in flight</span>
+          <span>·</span>
+          <span>{notStarted.length} not started</span>
         </>
       }
       right={
@@ -169,6 +167,7 @@ export function WorkItemsPage() {
         <div className="work-items-list">
           <Group label="needs you" rows={needsYou} onOpen={onOpen} />
           <Group label="in flight" rows={inFlight} onOpen={onOpen} />
+          <Group label="not started" rows={notStarted} onOpen={onOpen} />
         </div>
       )}
     </Page>
