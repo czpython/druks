@@ -21,7 +21,7 @@ from druks.durable.engine import configure_engine, init_dbos, launch, shutdown
 from druks.durable.enums import RunState
 from druks.models import StoredSubject
 from druks.notifications import outbox
-from druks.notifications.constants import CLOSED_MESSAGE
+from druks.notifications.constants import CLOSE_QUESTION_WORKFLOW, CLOSED_MESSAGE
 from druks.notifications.exceptions import (
     ChannelUnavailableError,
     DeliveryError,
@@ -231,6 +231,8 @@ class _DeliverSpy:
         self.failures_remaining = 0
         self.always_fail = False
         self.error: Exception = DeliveryError("is_archived")
+        # Set, a post waits for it, so a test can act while the post is under way.
+        self.hold: asyncio.Event | None = None
 
     async def __call__(
         self,
@@ -245,6 +247,7 @@ class _DeliverSpy:
         token=None,
         deep_link=None,
         outcome="",
+        question_offset=None,
     ):
         self.calls.append(
             {
@@ -258,8 +261,11 @@ class _DeliverSpy:
                 "token": token,
                 "deep_link": deep_link,
                 "outcome": outcome,
+                "question_offset": question_offset,
             }
         )
+        if self.hold and not message_ts:
+            await self.hold.wait()
         if self.always_fail:
             raise self.error
         if self.failures_remaining:
@@ -1093,3 +1099,124 @@ async def test_a_park_notifies_the_run_s_account_by_its_channel(rt, deliver_spy)
     assert notification.account_id == account_id
     (call,) = deliver_spy.calls
     assert call["channel"] == "C-explicit"
+
+
+async def _create_question(user_id: str) -> Notification:
+    """A question that a Slack chat's agent asked, as its turn left it."""
+    await _install_slack()
+    account = await Account.get_default(db_session())
+    conversation = Conversation(
+        account_id=account.id,
+        source=ConversationSource.SLACK,
+        user_id=user_id,
+        thread_id="C9:1700000000.000300",
+    )
+    db_session().add(conversation)
+    await db_session().flush()
+    return await Notification.create(
+        db_session(),
+        conversation_id=conversation.id,
+        reason="question.asked",
+        body="I read both.\n\nWhich database?",
+        question_offset=12,
+        actions=[{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}],
+    )
+
+
+async def _ask(rt, user_id: str) -> Notification:
+    """The question and its queued send, as the turn that asked commits them."""
+
+    async def create():
+        question = await _create_question(user_id)
+        await outbox.queue_send(db_session(), question)
+        return question
+
+    return await _seed(rt, create)
+
+
+async def _answer_in_words(rt, conversation_id: str) -> None:
+    """What the person's typed answer does when their message reaches the agent."""
+
+    async def close():
+        await outbox.close_questions(db_session(), conversation_id)
+
+    await _seed(rt, close)
+
+
+async def _wait_workflow(rt, workflow_id: str, statuses=("SUCCESS", "ERROR")) -> str:
+    deadline = asyncio.get_event_loop().time() + 30
+    while asyncio.get_event_loop().time() < deadline:
+        with rt.schema_engine.connect() as connection:
+            status = connection.execute(
+                text("SELECT status FROM dbos.workflow_status WHERE workflow_uuid = :id"),
+                {"id": workflow_id},
+            ).scalar_one_or_none()
+        if status in statuses:
+            return status
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"workflow {workflow_id} is still {status}")
+
+
+async def test_a_question_that_an_answer_closed_in_the_queue_posts_its_reply_closed(
+    rt, deliver_spy
+):
+    async def create():
+        question = await _create_question("U21")
+        await outbox.close_questions(db_session(), question.conversation_id)
+        await outbox.queue_send(db_session(), question)
+        return question
+
+    question = await _seed(rt, create)
+
+    assert await _wait_workflow(rt, f"{CLOSE_QUESTION_WORKFLOW}:{question.id}") == "SUCCESS"
+    done = await _snapshot(rt, question.id)
+    assert (done["state"], done["message_id"]) == ("acknowledged", "C9:1700000000.000001")
+    posted = deliver_spy.calls[0]
+    assert (posted["message_ts"], posted["body"], posted["question_offset"]) == (
+        "",
+        "I read both.\n\nWhich database?",
+        12,
+    )
+    assert (posted["actions"], posted["outcome"]) == (None, CLOSED_MESSAGE)
+
+
+async def test_an_answer_while_a_question_posts_takes_its_buttons_off_after_the_post(
+    rt, deliver_spy
+):
+    deliver_spy.hold = asyncio.Event()
+    question = await _ask(rt, "U22")
+    deadline = asyncio.get_event_loop().time() + 30
+    while not deliver_spy.calls:
+        assert asyncio.get_event_loop().time() < deadline, "the question never posted"
+        await asyncio.sleep(0.1)
+
+    await _answer_in_words(rt, question.conversation_id)
+    close = f"{CLOSE_QUESTION_WORKFLOW}:{question.id}"
+    await _wait_workflow(rt, close, statuses=("PENDING", "SUCCESS", "ERROR"))
+    await asyncio.sleep(1.0)  # room for a close that does not wait for the post to end
+    deliver_spy.hold.set()
+
+    assert await _wait_workflow(rt, close) == "SUCCESS"
+    done = await _snapshot(rt, question.id)
+    posted, closed = deliver_spy.calls
+    assert (done["state"], done["message_id"]) == ("acknowledged", "C9:1700000000.000001")
+    assert (posted["actions"], posted["question_offset"]) == (question.actions, 12)
+    assert (closed["message_ts"], closed["outcome"], closed["actions"]) == (
+        "1700000000.000001",
+        CLOSED_MESSAGE,
+        None,
+    )
+    assert closed["question_offset"] == 12
+
+
+async def test_a_refused_edit_leaves_the_question_closed_and_retries_nothing(rt, deliver_spy):
+    question = await _ask(rt, "U24")
+    await _wait_for(rt, question.id, lambda s: s["state"] == "delivered")
+    deliver_spy.always_fail = True
+
+    await _answer_in_words(rt, question.conversation_id)
+
+    assert await _wait_workflow(rt, f"{CLOSE_QUESTION_WORKFLOW}:{question.id}") == "SUCCESS"
+    _, refused = deliver_spy.calls
+    assert refused["outcome"] == CLOSED_MESSAGE
+    assert (await _snapshot(rt, question.id))["state"] == "acknowledged"

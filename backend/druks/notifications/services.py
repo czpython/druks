@@ -1,5 +1,3 @@
-from typing import Any
-
 from dbos import DBOS
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +31,7 @@ async def list_notification_channels() -> list[dict]:
     return sorted(await client.list_member_channels(), key=lambda channel: channel["name"])
 
 
-async def get_offered_control(ask: dict[str, Any], control: str) -> dict[str, Any]:
+async def get_offered_control(ask: dict, control: str) -> dict:
     """The control that the ask offers under the id ``control``."""
     for offered in ask.get("controls", []):
         if offered["id"] == control:
@@ -49,7 +47,7 @@ async def validate_in_app_answer(
     control: str,
     answers: dict[str, str],
     note: str,
-) -> dict[str, Any]:
+) -> dict:
     # The in-app answer contract, shared by the runs resume route, the answer_gate
     # tool, and the notification respond rail. A question that a chat on an app's
     # channel asked is its admin's alone. A run of an app that a team lists is its team's
@@ -96,43 +94,54 @@ async def validate_in_app_answer(
 async def respond_to_notification(
     session: AsyncSession,
     token: str,
-    choice: dict[str, Any],
+    choice: dict,
     *,
     user_id: str | None,
     account_id: str | None,
 ) -> Notification:
-    """Answer the run with a click by ``user_id``, whose account is ``account_id``, or with
-    a link, which names nobody. In a chat, only its person answers, and a click that needs
-    more goes to its agent."""
+    """Answer the notification with a click by ``user_id``, whose account is
+    ``account_id``, or with a link, which names nobody. In a chat, only its person answers.
+    A click on the question of the chat's agent, or one that needs more, goes to the agent
+    as the person's message."""
     notification = await Notification.get_for_token(session, token)
     if not notification:
         raise UnknownTokenError()
     if notification.is_acknowledged:
         raise AlreadyAcknowledgedError()
-    if not notification.run_id:
-        # A run-less notification routes no reply.
+    run, ask = None, {}
+    if notification.run_id:
+        # The notification snapshots the round it was sent for; the answer must
+        # land on the run's live round, so the read goes past the identity map.
+        run = await session.get(Run, notification.run_id, populate_existing=True)
+        if (
+            run.state != RunState.PARKED.value
+            or run.input_requested_at != notification.run_parked_at
+        ):
+            raise StaleRoundError()
+        ask = await run.get_ask()
+        if ask.get("presentation") != "in_app":
+            # External gates are answered on their source (PR review, ticket
+            # comment) via the existing webhook paths, never through this rail —
+            # and an ask that doesn't declare in_app isn't answerable either
+            # (the same declared-key read get_ask itself dispatches on).
+            raise InvalidChoiceError("this notification is informational; answer on its source")
+    elif not notification.conversation_id or not notification.actions:
+        # Without a run, only the question of a chat's agent takes an answer.
         raise InvalidChoiceError("this notification does not take an answer")
-    # The notification snapshots the round it was sent for; the answer must
-    # land on the run's live round, so the read goes past the identity map.
-    run = await session.get(Run, notification.run_id, populate_existing=True)
-    if run.state != RunState.PARKED.value or run.input_requested_at != notification.run_parked_at:
-        raise StaleRoundError()
-    ask = await run.get_ask()
-    if ask.get("presentation") != "in_app":
-        # External gates are answered on their source (PR review, ticket
-        # comment) via the existing webhook paths, never through this rail —
-        # and an ask that doesn't declare in_app isn't answerable either
-        # (the same declared-key read get_ask itself dispatches on).
-        raise InvalidChoiceError("this notification is informational; answer on its source")
     control = choice["control"]
     if notification.conversation_id:
         conversation = await session.get(Conversation, notification.conversation_id)
-        if user_id != conversation.user_id:
-            raise AnswerNotAllowedError("Only the person who started this run can answer it.")
+        # A link names nobody, so it answers no chat.
+        if not user_id or user_id != conversation.user_id:
+            raise AnswerNotAllowedError("Only the person of this conversation can answer it.")
         label = notification.get_action(control)["label"]
-        if (await get_offered_control(ask, control))["note_required"] or ask["questions"]:
-            # A click carries only its control, so the chat's agent asks for the rest and
-            # answers the run.
+        if (
+            not run
+            or (await get_offered_control(ask, control))["note_required"]
+            or ask["questions"]
+        ):
+            # A click on the agent's question, or on a control that needs more, reaches the
+            # chat's agent as the person's message.
             if not await notification.mark_acknowledged():
                 raise AlreadyAcknowledgedError()
             await conversation.create_message(session, label)

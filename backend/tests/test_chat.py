@@ -34,7 +34,7 @@ from druks.chat.exceptions import (
 from druks.chat.models import Conversation, Message
 from druks.contrib.software_factory.app import SoftwareFactory
 from druks.database import get_session, session_scope
-from druks.durable.constants import TASK_QUEUE
+from druks.durable.constants import NOTIFICATIONS_QUEUE, TASK_QUEUE
 from druks.durable.dbos_state import workflow_status
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
@@ -45,6 +45,8 @@ from druks.mcp.enums import Credential, Toolkit
 from druks.mcp.inbound import get_druks_account_token, get_druks_mcp_server
 from druks.mcp.models import McpServer
 from druks.models import Base
+from druks.notifications.constants import CLOSE_QUESTION_WORKFLOW, SEND_WORKFLOW
+from druks.notifications.models import Notification
 from druks.redis import get_client
 from druks.sandbox.exceptions import IdentityDenied
 from druks.sandbox.host import Host
@@ -568,6 +570,226 @@ async def test_a_channel_turn_with_no_answer_is_asked_once(druks_db, conversatio
     failure = send_reply.await_args.args[2]
     assert (failure.body, failure.reply_to) == (DELIVERY_FAILED_MESSAGE, asked.id)
     assert not await conversation.get_unanswered_message(druks_db)
+
+
+QUESTION = {"question": "Which database?", "choices": ["Postgres", "MySQL", "SQLite"]}
+
+
+async def record_question(conversation, message):
+    """What chat_ask leaves for the end of the turn of ``message``."""
+    await get_client().set(service.question_key(conversation.id, message.id), json.dumps(QUESTION))
+
+
+@pytest.fixture
+async def slack_conversation(druks_db, conversation, monkeypatch):
+    conversation.source = ConversationSource.SLACK
+    conversation.user_id = "U1"
+    conversation.thread_id = "C9:1700000000.000100"
+    conversation.connection = await VaultSecret.store(
+        druks_db,
+        services.get("slack").secret_kind,
+        Audience.service("slack"),
+        identity={},
+        secrets={},
+    )
+    await druks_db.commit()
+    monkeypatch.setattr(Conversation, "is_held", AsyncMock(return_value=False))
+    return conversation
+
+
+async def put_question(tmp_path, body: dict, conversation_id: str):
+    """Call chat_ask as the owner's agent does. A tool call from no chat names no
+    conversation."""
+    api = configure_app_for_test(
+        settings=make_settings(tmp_path, identity={"mode": "header", "header": "X-User"}),
+        authenticated=False,
+    )
+    headers = {"X-User": "owner@example.com"}
+    if conversation_id:
+        headers[CONVERSATION_HEADER] = conversation_id
+    async with asgi_client(api) as client:
+        return await client.put("/api/chat/question", json=body, headers=headers)
+
+
+async def test_a_question_waits_on_the_newest_message_of_the_turn(druks_db, conversation, tmp_path):
+    first = await conversation.get_unanswered_message(druks_db)
+    newest = await conversation.create_message(druks_db, "And the cache?")
+    # One turn takes both messages, and its newest message names it.
+    for message in (first, newest):
+        assert await message.mark_delivered(druks_db)
+    await druks_db.commit()
+
+    response = await put_question(
+        tmp_path,
+        {"question": " Which database? ", "choices": ["Postgres", " MySQL", "SQLite"]},
+        conversation.id,
+    )
+
+    assert response.status_code == 204
+    assert not await get_client().exists(service.question_key(conversation.id, first.id))
+    saved = await get_client().get(service.question_key(conversation.id, newest.id))
+    assert json.loads(saved) == QUESTION
+
+
+async def test_a_question_needs_a_turn_that_runs(druks_db, conversation, tmp_path):
+    # The conversation's only message waits for its turn.
+    before_the_turn = await put_question(tmp_path, QUESTION, conversation.id)
+    outside_a_chat = await put_question(tmp_path, QUESTION, "")
+
+    assert (before_the_turn.status_code, outside_a_chat.status_code) == (409, 409)
+    assert not await get_client().keys("chat:*:question:*")
+
+
+@pytest.mark.parametrize(
+    ("body", "offset", "notice", "question_offset"),
+    [
+        ("Let me check.I read both.", 13, "I read both.\n\nWhich database?", 12),
+        ("Let me check.", 13, "Which database?", 0),
+    ],
+    ids=["reply-then-question", "question-only"],
+)
+async def test_a_question_goes_out_with_the_reply_as_one_message_with_buttons(
+    druks_db, slack_conversation, monkeypatch, body, offset, notice, question_offset
+):
+    send_reply = AsyncMock()
+    monkeypatch.setattr(channels.get("slack"), "send_reply", send_reply)
+    tool_calls = [{"toolCallId": "ask-1", "textOffset": offset}]
+    monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=(body, tool_calls)))
+    message = await slack_conversation.get_unanswered_message(druks_db)
+    message.state = MessageState.DELIVERED
+    await record_question(slack_conversation, message)
+
+    await service.finish_turn(
+        druks_db,
+        slack_conversation,
+        message,
+        Bridge(None),
+        {"status": "replied", "archivePath": ""},
+    )
+
+    send_reply.assert_not_awaited()
+    [question] = await druks_db.scalars(select(Notification))
+    assert (question.conversation_id, question.account_id, question.run_id) == (
+        slack_conversation.id,
+        None,
+        None,
+    )
+    assert (question.body, question.question_offset) == (notice, question_offset)
+    assert question.actions == [
+        {"id": "1", "label": "Postgres"},
+        {"id": "2", "label": "MySQL"},
+        {"id": "3", "label": "SQLite"},
+    ]
+    queued = await druks_db.scalars(
+        select(workflow_status.c.workflow_uuid).where(
+            workflow_status.c.queue_name == NOTIFICATIONS_QUEUE
+        )
+    )
+    assert list(queued) == [f"{SEND_WORKFLOW}:{question.id}"]
+    # The question answers the person, so Druks does not ask the agent again.
+    assert not await slack_conversation.get_unanswered_message(druks_db)
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "saved"),
+    [
+        (
+            "Let me check.I read both.",
+            "replied",
+            "Let me check.I read both.\n\nWhich database?\n1. Postgres\n2. MySQL\n3. SQLite",
+        ),
+        (
+            "Let me check.",
+            "replied",
+            "Let me check.Which database?\n1. Postgres\n2. MySQL\n3. SQLite",
+        ),
+        ("Let me check.I read both.", "cancelled", "Let me check.I read both."),
+    ],
+    ids=["reply-then-question", "question-only", "stopped"],
+)
+async def test_a_web_reply_ends_with_the_question_and_its_numbered_choices(
+    druks_db, conversation, monkeypatch, body, status, saved
+):
+    tool_calls = [{"toolCallId": "ask-1", "textOffset": 13}]
+    monkeypatch.setattr(Bridge, "reply", AsyncMock(return_value=(body, tool_calls)))
+    message = await conversation.get_unanswered_message(druks_db)
+    message.state = MessageState.DELIVERED
+    await record_question(conversation, message)
+
+    await service.finish_turn(
+        druks_db, conversation, message, Bridge(None), {"status": status, "archivePath": ""}
+    )
+
+    assert (await list_messages(druks_db, conversation))[-1].body == saved
+
+
+@pytest.mark.parametrize("is_internal", [False, True], ids=["person", "druks"])
+async def test_a_person_s_message_closes_the_open_questions_of_its_conversation(
+    druks_db, slack_conversation, sandbox, monkeypatch, is_internal
+):
+    other = Conversation(
+        account_id=slack_conversation.account_id,
+        source=ConversationSource.SLACK,
+        user_id="U2",
+        thread_id="C9:1700000000.000100",
+    )
+    druks_db.add(other)
+    await druks_db.flush()
+    run = await seed_run(
+        druks_db, kind=Summarize.kind, state="parked", input_gate="review", input_request={}
+    )
+    choices = [{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}]
+    question, elsewhere, approval = [
+        await Notification.create(
+            druks_db,
+            conversation_id=conversation_id,
+            reason=reason,
+            body="Which database?",
+            question_offset=0,
+            actions=choices,
+            run_id=run_id,
+        )
+        for conversation_id, reason, run_id in [
+            (slack_conversation.id, "question.asked", None),
+            (other.id, "question.asked", None),
+            # A run's approval is the run's to close, even when its body has a question.
+            (slack_conversation.id, "gate.parked", run.id),
+        ]
+    ]
+    for posted in (question, elsewhere, approval):
+        await posted.mark_delivered(f"C9:{posted.id}")
+    # The turn before asked. What arrived since goes to the agent in this turn.
+    previous_message = await slack_conversation.get_unanswered_message(druks_db)
+    previous_message.state = MessageState.REPLIED
+    await slack_conversation.create_message(druks_db, "MySQL, I think", is_internal=is_internal)
+    await druks_db.commit()
+
+    async def request(self, method, **values):
+        return {"status": "idle", "sessionId": "one"}
+
+    async def follow_turn(session, conversation, message, bridge, naming):
+        message.state = MessageState.REPLIED
+        await session.commit()
+
+    monkeypatch.setattr(Bridge, "request", request)
+    monkeypatch.setattr(service, "follow_turn", follow_turn)
+
+    await service.deliver_pending(druks_db, slack_conversation)
+
+    closed = [] if is_internal else [question.id]
+    for notification in (question, elsewhere, approval):
+        await druks_db.refresh(notification)
+    assert [
+        notification.id
+        for notification in (question, elsewhere, approval)
+        if notification.is_acknowledged
+    ] == closed
+    queued = await druks_db.scalars(
+        select(workflow_status.c.workflow_uuid).where(
+            workflow_status.c.queue_name == NOTIFICATIONS_QUEUE
+        )
+    )
+    assert list(queued) == [f"{CLOSE_QUESTION_WORKFLOW}:{closed_id}" for closed_id in closed]
 
 
 def channel(answer: bytes) -> tuple[asyncio.StreamReader, MagicMock]:

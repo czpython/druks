@@ -200,6 +200,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
         "chat_read_thread",
         "chat_read_file",
         "chat_require_tag",
+        "chat_ask",
         "chat_start_conversation",
         "chat_list_reminders",
         "chat_create_reminder",
@@ -243,6 +244,8 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
     )
     reason = tools["cancel_run"].input_schema["properties"]["reason"]
     assert (reason["minLength"], reason["maxLength"]) == (1, 500)
+    choices = tools["chat_ask"].input_schema["properties"]["choices"]
+    assert (choices["minItems"], choices["maxItems"]) == (2, 4)
     assert tools["software_factory_start"].input_schema["properties"]["ticket"]["description"] == (
         "The tracker's ticket key, e.g. ENG-831, or owner/repo#12 for GitHub."
     )
@@ -672,6 +675,9 @@ async def test_every_tool_failure_answers_the_agent_route_shape(app, pat_token):
         invalid = await _call_error(client, "get_agent_call", {"id": "abc"})
         unsendable = await _call_error(client, "get_agent_call", {"call": ".."})
         refused = await _call_error(client, "chat_read_thread", {})
+        unasked = await _call_error(
+            client, "chat_ask", {"question": "Which one?", "choices": ["Only one"]}
+        )
     assert invalid == {
         "code": "INVALID_TOOL_ARGUMENTS",
         "message": (
@@ -691,6 +697,11 @@ async def test_every_tool_failure_answers_the_agent_route_shape(app, pat_token):
     assert refused == {
         "code": "HTTP_409",
         "message": "This tool reads a channel conversation's thread. Call it from one.",
+        "retryable": False,
+    }
+    assert unasked == {
+        "code": "VALIDATION_ERROR",
+        "message": "choices: List should have at least 2 items after validation, not 1",
         "retryable": False,
     }
 

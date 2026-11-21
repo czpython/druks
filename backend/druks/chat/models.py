@@ -18,6 +18,7 @@ from druks.files import FileField
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
 from druks.models import Base, Model
+from druks.notifications.models import Notification
 from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 
@@ -360,16 +361,19 @@ class Conversation(Base, Uuid7Pk):
         )
 
     async def list_reply_source_ids(self, session: AsyncSession) -> list[str]:
-        """The ids at the source of the replies Druks sent in this conversation."""
-        return list(
-            await session.scalars(
-                select(Message.source_id).where(
-                    Message.conversation_id == self.id,
-                    Message.role == MessageRole.ASSISTANT,
-                    Message.source_id.is_not(None),
-                )
-            )
+        """The ids at the source of the replies Druks sent in this conversation. A reply
+        that asks a question goes out as the message of the question's notification."""
+        replies = select(Message.source_id).where(
+            Message.conversation_id == self.id,
+            Message.role == MessageRole.ASSISTANT,
+            Message.source_id.is_not(None),
         )
+        questions = select(Notification.message_id).where(
+            Notification.conversation_id == self.id,
+            Notification.run_id.is_(None),
+            Notification.message_id.is_not(None),
+        )
+        return list(await session.scalars(replies.union_all(questions)))
 
     async def list_pending_messages(self, session: AsyncSession) -> list[Message]:
         """The messages that wait for the next turn, oldest first: the pending messages,

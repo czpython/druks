@@ -44,20 +44,26 @@ async def test_unique_token_collision_raises(druks_db):
         await druks_db.flush()
 
 
-async def test_only_its_person_reads_a_person_s_notification(tmp_path, druks_db):
+async def test_only_its_person_reads_a_notification(tmp_path, druks_db):
     owner = await Account.get_or_create(druks_db, "owner@example.com")
     await Account.get_or_create(druks_db, "other@example.com")
-    notification = await Notification.create(druks_db, account_id=owner.id, reason="r", body="b")
+    conversation = await Conversation.create(druks_db, account_id=owner.id, body="Which one?")
+    notifications = [
+        await Notification.create(druks_db, account_id=owner.id, reason="r", body="b"),
+        await Notification.create(
+            druks_db, conversation_id=conversation.id, reason="question.asked", body="b"
+        ),
+    ]
     await druks_db.commit()
     settings = make_settings(tmp_path, identity={"mode": "header", "header": "X-ExeDev-Email"})
     app = configure_app_for_test(settings=settings, authenticated=False)
 
     with TestClient(app) as client:
-        path = f"/api/notifications/{notification.id}"
-        as_owner = client.get(path, headers={"X-ExeDev-Email": "owner@example.com"})
-        as_other = client.get(path, headers={"X-ExeDev-Email": "other@example.com"})
-    assert as_owner.status_code == 200
-    assert as_other.status_code == 404
+        for notification in notifications:
+            path = f"/api/notifications/{notification.id}"
+            as_owner = client.get(path, headers={"X-ExeDev-Email": "owner@example.com"})
+            as_other = client.get(path, headers={"X-ExeDev-Email": "other@example.com"})
+            assert (as_owner.status_code, as_other.status_code) == (200, 404)
 
 
 async def test_the_list_holds_only_the_person_s_own_notifications(tmp_path, druks_db):
@@ -332,6 +338,89 @@ async def test_a_click_that_needs_more_goes_to_the_chat(
     click = await conversation.get_unanswered_message(druks_db)
     assert (click.body, click.role, click.is_internal) == (label, MessageRole.USER, False)
     started.assert_awaited_once_with(deliver, run.conversation_id)
+
+
+async def _question_notification(druks_db, *, person="U1"):
+    """A question that the agent of a Slack chat with ``person`` asked, as its turn left
+    it."""
+    account = await Account.get_or_create(druks_db, "op@example.com")
+    conversation = Conversation(
+        account_id=account.id,
+        source=ConversationSource.SLACK,
+        user_id=person,
+        thread_id="C9:1700000000.000100",
+    )
+    druks_db.add(conversation)
+    await druks_db.flush()
+    return await Notification.create(
+        druks_db,
+        conversation_id=conversation.id,
+        reason="question.asked",
+        body="Which database?",
+        question_offset=0,
+        actions=[{"id": "1", "label": "Postgres"}, {"id": "2", "label": "MySQL"}],
+    )
+
+
+@pytest.fixture
+def started(monkeypatch):
+    """The chat deliveries that a click starts."""
+    started = AsyncMock()
+    monkeypatch.setattr(
+        "druks.notifications.services.DBOS", SimpleNamespace(start_workflow_async=started)
+    )
+    return started
+
+
+async def test_a_click_on_a_chat_question_is_the_person_s_next_message(druks_db, started):
+    question = await _question_notification(druks_db)
+
+    await respond_to_notification(
+        druks_db, question.correlation_token, {"control": "2"}, user_id="U1", account_id=None
+    )
+
+    assert question.is_acknowledged
+    messages = await druks_db.execute(
+        select(Message.body, Message.is_internal, Message.state).where(
+            Message.conversation_id == question.conversation_id
+        )
+    )
+    assert messages.all() == [("MySQL", False, "pending")]
+    started.assert_awaited_once_with(deliver, question.conversation_id)
+
+
+async def test_a_link_answers_no_chat_question(druks_db, started):
+    # A link names nobody, so it answers no chat, even one whose person is unknown.
+    question = await _question_notification(druks_db, person=None)
+
+    with pytest.raises(AnswerNotAllowedError):
+        await respond_to_notification(
+            druks_db, question.correlation_token, {"control": "1"}, user_id=None, account_id=None
+        )
+
+    assert not question.is_acknowledged
+    started.assert_not_awaited()
+
+
+async def test_a_chat_without_a_run_takes_only_a_choice_that_its_question_offered(
+    druks_db, started
+):
+    question = await _question_notification(druks_db)
+    notice = await Notification.create(
+        druks_db, conversation_id=question.conversation_id, reason="r", body="No buttons."
+    )
+
+    with pytest.raises(InvalidChoiceError, match="unknown control '9'"):
+        await respond_to_notification(
+            druks_db, question.correlation_token, {"control": "9"}, user_id="U1", account_id=None
+        )
+    with pytest.raises(InvalidChoiceError):
+        await respond_to_notification(
+            druks_db, notice.correlation_token, {"control": "1"}, user_id="U1", account_id=None
+        )
+
+    assert not question.is_acknowledged
+    started.assert_not_awaited()
 
 
 async def test_respond_route_codes_and_secret_hygiene(tmp_path, druks_db, resume_spy):

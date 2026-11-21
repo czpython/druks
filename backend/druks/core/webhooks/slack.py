@@ -201,6 +201,7 @@ async def replace_buttons(
         message_ts=message_ts,
         deep_link=notification.deep_link,
         outcome=outcome,
+        question_offset=notification.question_offset,
     )
 
 

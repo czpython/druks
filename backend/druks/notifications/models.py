@@ -1,9 +1,8 @@
 import secrets
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String, or_, select, update
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, case, or_, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -28,18 +27,25 @@ class Notification(Base, Uuid7Pk):
             name="notifications_one_target_check",
         ),
         Index("notifications_account_idx", "account_id", "created_at"),
+        Index(
+            "notifications_conversation_idx",
+            "conversation_id",
+            postgresql_where=text("conversation_id IS NOT NULL"),
+        ),
     )
 
     # The subject ({type, id}) of the run the notification is about. None when that run
     # has no subject, or when the notification is about no run.
-    subject: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    subject: Mapped[dict | None] = mapped_column(JSONB, default=None)
     # Why it fired — a machine category (e.g. "gate.parked"); the discriminator
     # for per-reason routing later.
     reason: Mapped[str]
     # Markdown written by the caller — never a template.
     body: Mapped[str]
+    # Where a chat agent's question starts in the body, after its reply.
+    question_offset: Mapped[int | None] = mapped_column(default=None)
     # The offered choices [{id, label}]; None for a one-way notification.
-    actions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, default=None)
+    actions: Mapped[list[dict] | None] = mapped_column(JSONB, default=None)
     # Reply-routing back to a parked run: (run_id, run_parked_at) is the exact
     # round a click answers — stored on the row because a run can re-park a new
     # round before the human acts.
@@ -49,7 +55,7 @@ class Notification(Base, Uuid7Pk):
     run_parked_at: Mapped[datetime | None] = mapped_column(default=None)
     # A human view-link; the buttons carry the respond capability, this never does.
     deep_link: Mapped[str | None] = mapped_column(default=None)
-    # A run that a Slack conversation started posts its buttons in that conversation.
+    # The chat that shows the buttons: a question of its agent, or a run that it started.
     conversation_id: Mapped[str | None] = mapped_column(
         ForeignKey("chat_conversations.id", ondelete="CASCADE"), default=None
     )
@@ -83,8 +89,9 @@ class Notification(Base, Uuid7Pk):
         account_id: str | None = None,
         reason: str,
         body: str,
-        subject: dict[str, Any] | None = None,
-        actions: list[dict[str, Any]] | None = None,
+        question_offset: int | None = None,
+        subject: dict | None = None,
+        actions: list[dict] | None = None,
         run_id: str | None = None,
         run_parked_at: datetime | None = None,
         deep_link: str | None = None,
@@ -97,6 +104,7 @@ class Notification(Base, Uuid7Pk):
             account_id=account_id,
             reason=reason,
             body=body,
+            question_offset=question_offset,
             subject=subject,
             actions=actions,
             run_id=run_id,
@@ -168,11 +176,25 @@ class Notification(Base, Uuid7Pk):
         )
         return list(await session.scalars(stmt))
 
+    @classmethod
+    async def list_open_questions(
+        cls, session: AsyncSession, conversation_id: str
+    ) -> list["Notification"]:
+        """The questions of the conversation's agent that no answer closed yet, posted or
+        still in the queue. A notification of the conversation with no run is its agent's
+        question."""
+        stmt = select(cls).where(
+            cls.conversation_id == conversation_id,
+            cls.run_id.is_(None),
+            cls.state != NotificationState.ACKNOWLEDGED.value,
+        )
+        return list(await session.scalars(stmt))
+
     @property
     def is_acknowledged(self) -> bool:
         return self.state == NotificationState.ACKNOWLEDGED
 
-    def get_action(self, action_id: str) -> dict[str, Any]:
+    def get_action(self, action_id: str) -> dict:
         """The offered choice that a click on ``action_id`` picks."""
         for action in self.actions:
             if action["id"] == action_id:
@@ -180,11 +202,25 @@ class Notification(Base, Uuid7Pk):
         raise InvalidChoiceError(f"unknown control {action_id!r}")
 
     async def mark_delivered(self, message_id: str | None = None) -> None:
-        self.message_id = message_id
-        self.state = NotificationState.DELIVERED.value
-        self.delivered_at = Base.utc_now()
-        self.updated_at = Base.utc_now()
-        await self.session.flush()
+        """Record the posted message. A notification that a claim took while its message
+        posted stays acknowledged."""
+        await self.session.execute(
+            update(Notification)
+            .where(Notification.id == self.id)
+            .values(
+                message_id=message_id,
+                state=case(
+                    (
+                        Notification.state == NotificationState.ACKNOWLEDGED.value,
+                        Notification.state,
+                    ),
+                    else_=NotificationState.DELIVERED.value,
+                ),
+                delivered_at=Base.utc_now(),
+                updated_at=Base.utc_now(),
+            )
+        )
+        await self.session.refresh(self)
 
     async def mark_failed(self, reason: str) -> None:
         self.state = NotificationState.FAILED.value

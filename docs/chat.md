@@ -111,7 +111,8 @@ text after the agent's last tool call. The text before it holds the agent's
 notes. Only the Chat page shows them. When the agent writes nothing after its
 last tool call, Druks asks it once for the answer in an internal message. When
 that turn ends without text too, the channel gets "The reply is unavailable.
-Send the message again to retry."
+Send the message again to retry." A turn that asks a [question](#questions) has
+an answer, even with no text.
 
 An agent plan shows the latest complete plan. A plan update replaces the
 previous list. Tool updates instead change only the fields that the adapter
@@ -126,6 +127,32 @@ Only the Chat page shows it.
 
 The page stays at the bottom while text arrives. Scroll up to read earlier
 messages. **Latest message** returns to the bottom.
+
+## Questions
+
+The agent can ask you a question with two to four short choices. It calls
+`chat_ask` during its turn, and the call returns at once: the agent does not wait
+for your answer. `chat_ask` is a tool of the Druks toolkit, so the agent of an
+operator has it, on the web and on each channel. The agents of a public WhatsApp
+number have only the tools that their Bot names, so they do not have it.
+
+When the turn ends, Druks sends the question after the agent's reply:
+
+- In Slack, the reply, the question, and a button for each choice come in one
+  message. A reply too long for one message loses its end. The question and the
+  buttons stay whole.
+- In the web chat, WhatsApp, and GitHub, the reply ends with the question and its
+  choices as a numbered list. Answer with a number or in your own words.
+
+Select a button, and its choice reaches the agent as your next message. The
+message then shows your choice in place of the buttons. Only the person of the
+conversation can select one. When you write an answer instead, it reaches the
+agent as any message does. When your message reaches the agent, Druks takes the
+buttons off each open question of the conversation, and its message says that the
+question is closed. When you write while the agent asks, your message can close
+the question before Druks posts it. Druks then posts the reply and the question
+with no buttons, and the message says that the question is closed. A turn that you
+stop asks nothing, and neither does a turn of a paused conversation.
 
 ## Agent access
 

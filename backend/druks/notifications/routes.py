@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
+from druks.chat.models import Conversation
 from druks.notifications.exceptions import (
     AlreadyAcknowledgedError,
     AnswerNotAllowedError,
@@ -59,8 +60,15 @@ async def get_notification(
     session: SessionDep, notification_id: str, account: Account = Depends(current_account)
 ) -> Notification:
     notification = await session.get(Notification, notification_id)
-    # A person's notification is theirs only. Another account finds no such notification.
-    if not notification or notification.account_id not in (None, account.id):
+    # A person's notification is theirs only, and a chat's notification is its person's.
+    # Another account finds no such notification.
+    if not notification or not (
+        notification.account_id == account.id
+        or (
+            notification.conversation_id
+            and await Conversation.get_for_account(session, notification.conversation_id, account)
+        )
+    ):
         raise HTTPException(status_code=404, detail=f"Notification {notification_id!r} not found")
     return notification
 
