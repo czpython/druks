@@ -36,7 +36,7 @@ class Notification(Base, Uuid7Pk):
     # Why it fired — a machine category (e.g. "gate.parked"); the discriminator
     # for per-reason routing later.
     reason: Mapped[str]
-    # Plain prose written by the caller — never a template.
+    # Markdown written by the caller — never a template.
     body: Mapped[str]
     # The offered choices [{id, label}]; None for a one-way notification.
     actions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, default=None)

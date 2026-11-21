@@ -57,6 +57,27 @@ describe('NotificationBell', () => {
     expect(api.markNotificationsRead).not.toHaveBeenCalled()
   })
 
+  it('shows an approval by its label beside the notices that it keeps whole', async () => {
+    const approval: NotificationResponse = {
+      id: 'n2',
+      body: '# Review: Plan\n\nThe plan changes the schema.\n\nWhich database?\n- Postgres (recommended)\n\nShip it.',
+      deepLink: 'https://druks.example/runs/run-1',
+      readAt: '2026-11-17T09:05:00Z',
+      createdAt: '2026-11-17T09:00:00Z',
+    }
+    vi.mocked(api.listNotifications).mockResolvedValue([approval, { ...disconnect, readAt: '2026-11-17T09:05:00Z' }])
+    renderBell()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications' }))
+
+    const rows = await screen.findAllByRole('link')
+    expect(rows.map((row) => [row.textContent, row.getAttribute('href')])).toEqual([
+      ['Review: Plan', approval.deepLink],
+      [disconnect.body, disconnect.deepLink],
+    ])
+    expect(screen.queryByText(/Which database/)).toBeNull()
+  })
+
   it('says how to choose a route to a person with no channel and no Slack account', async () => {
     vi.mocked(api.listNotifications).mockResolvedValue([])
     vi.mocked(api.getPersonalSettings).mockResolvedValue({

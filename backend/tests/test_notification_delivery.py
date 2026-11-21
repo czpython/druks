@@ -2,13 +2,17 @@ from types import SimpleNamespace
 
 import pytest
 from druks.core.apis.slack import SlackClient
+from druks.durable.models import AgentCall, Artifact, Run
 from druks.notifications.buttons import decode_button, encode_button
-from druks.notifications.delivery import deliver
+from druks.notifications.constants import MARKDOWN_TEXT_LIMIT
+from druks.notifications.delivery import cut_markdown, deliver
 from druks.notifications.exceptions import (
     ChannelUnavailableError,
     DeliveryError,
     MalformedButtonError,
 )
+from druks.testing import seed_call, seed_run
+from druks_field_notes.workflows import Summarize
 from slack_sdk.errors import SlackApiError
 
 _BOT_TOKEN = "xoxb-delivery"
@@ -38,19 +42,37 @@ async def test_plain_delivery_posts_the_body_and_the_link(slack):
     (post,) = slack.posts
     assert (post["bot_token"], post["channel"]) == (_BOT_TOKEN, "C1")
     assert post["text"] == "Review the PR\nhttps://github.com/acme/app/7"
-    (section,) = post["blocks"]
-    assert section["text"]["text"] == post["text"]
+    assert post["blocks"] == [{"type": "markdown", "text": post["text"]}]
 
 
-async def test_a_long_body_is_cut_to_fit_slack_and_keeps_its_link(slack):
+async def test_a_body_too_long_for_slack_is_cut_and_keeps_its_link(slack):
     link = "https://druks.example/runs/run-1"
+    body = "Your run failed: " + "x" * 20_000
 
-    await deliver(SlackClient(token=_BOT_TOKEN), "C1", "x" * 5000, deep_link=link)
+    await deliver(SlackClient(token=_BOT_TOKEN), "C1", body, deep_link=link)
 
     (post,) = slack.posts
-    (section,) = post["blocks"]
-    assert len(section["text"]["text"]) == 3000
-    assert section["text"]["text"].endswith(f"…\n{link}")
+    assert len(post["text"]) == MARKDOWN_TEXT_LIMIT
+    assert post["text"].startswith("Your run failed: xxx")
+    assert post["text"].endswith(f"x\n\n…\n{link}")
+    assert post["blocks"] == [{"type": "markdown", "text": post["text"]}]
+
+
+@pytest.mark.parametrize(
+    ("text", "ending"),
+    [
+        ("Run this:\n```bash\n" + "make test\n" * 100, "make test\n```\n\n…"),
+        ("1. Run this:\n   ```bash\n" + "   make test\n" * 100, "   make test\n   ```\n\n…"),
+        (
+            "````markdown\n```python\nprint()\n```\n" + "more of the example\n" * 100,
+            "more of the example\n````\n\n…",
+        ),
+        ("```inline``` code\n" + "a line\n" * 100, "a line\n\n…"),
+    ],
+    ids=["fence", "fence-in-a-list-item", "fence-in-a-fence", "inline-code"],
+)
+def test_a_cut_closes_a_fence_only_as_markdown_closes_it(text, ending):
+    assert cut_markdown(text, 300).endswith(ending)
 
 
 async def test_button_delivery_posts_one_button_per_action(slack):
@@ -66,8 +88,8 @@ async def test_button_delivery_posts_one_button_per_action(slack):
 
     (post,) = slack.posts
     assert post["text"] == "review the plan"
-    section, action_block = post["blocks"]
-    assert section["text"]["text"] == "review the plan"
+    markdown, action_block = post["blocks"]
+    assert markdown == {"type": "markdown", "text": "review the plan"}
     assert [button["text"]["text"] for button in action_block["elements"]] == [
         "Approve",
         "Reject",
@@ -161,9 +183,10 @@ async def test_delivery_with_a_message_ts_edits_that_message_and_shows_the_outco
         "C1",
         "1700000000.000200",
     )
-    assert [block["text"]["text"] for block in post["blocks"]] == [
-        "review the plan",
-        "Answer: Approve",
+    assert post["text"] == "review the plan"
+    assert post["blocks"] == [
+        {"type": "markdown", "text": "review the plan"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Answer: Approve"}},
     ]
 
 
@@ -183,3 +206,80 @@ async def test_delivery_to_a_user_shows_the_message_to_that_person_only(slack):
         "U7",
         "1700000000.000100",
     )
+    assert post["text"] == "This notification was already acknowledged."
+    assert post["blocks"] == [{"type": "markdown", "text": post["text"]}]
+
+
+async def _parked_review(druks_db, *, document: str = "", **ask) -> Run:
+    """A run parked on an in-app review. Its call wrote ``document`` as the run's artifact."""
+    run = await seed_run(
+        druks_db,
+        kind=Summarize.kind,
+        state="parked",
+        input_gate="review",
+        input_request={
+            "presentation": "in_app",
+            "controls": [{"id": "approve", "note_required": False}],
+            "questions": [],
+            **ask,
+        },
+    )
+    if document:
+        call = await seed_call(druks_db, run, "summarize")
+        await Artifact.record(
+            druks_db,
+            call_dir=call.call_dir,
+            call_id=call.id,
+            kind="markdown",
+            title="Plan",
+            content=document,
+            event={},
+        )
+    return run
+
+
+@pytest.mark.usefixtures("tmp_data_dir")
+async def test_an_approval_writes_its_label_context_questions_and_document_in_order(druks_db):
+    run = await _parked_review(
+        druks_db,
+        document="## Steps\nShip it.",
+        context="The plan changes the schema.",
+        questions=[
+            {
+                "id": "database",
+                "prompt": "Which database?",
+                "options": [
+                    {"id": "postgres", "label": "Postgres", "recommended": True},
+                    {"id": "mysql", "label": "MySQL", "recommended": False},
+                ],
+            },
+            # An app's question can leave the flag out.
+            {
+                "id": "cache",
+                "prompt": "Which cache?",
+                "options": [{"id": "redis", "label": "Redis"}],
+            },
+        ],
+    )
+
+    rendered = await run.get_rendered_ask(has_chat=False)
+
+    assert rendered["body"] == (
+        "# Review: Plan\n\n"
+        "The plan changes the schema.\n\n"
+        "Which database?\n- Postgres (recommended)\n- MySQL\n\n"
+        "Which cache?\n- Redis\n\n"
+        "## Steps\nShip it."
+    )
+
+
+@pytest.mark.usefixtures("tmp_data_dir")
+async def test_an_approval_whose_document_is_gone_goes_out_without_it(druks_db):
+    run = await _parked_review(druks_db, document="Ship it.", context="Check the schema.")
+    artifact = await Artifact.get_latest_for_run(druks_db, run.id)
+    call = await AgentCall.get(druks_db, artifact.agent_call_id)
+    (call.call_dir / artifact.path).unlink()
+
+    rendered = await run.get_rendered_ask(has_chat=False)
+
+    assert rendered["body"] == "# Review: Plan\n\nCheck the schema."

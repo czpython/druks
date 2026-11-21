@@ -32,6 +32,14 @@ class AgentCallNotFound(DruksError):
         self.agent_call_id = agent_call_id
 
 
+class ArtifactContentMissing(DruksError):
+    """The directory of the artifact's call holds no file for it."""
+
+    def __init__(self, artifact_id: str) -> None:
+        super().__init__(f"Artifact {artifact_id} has no content in its call's directory.")
+        self.artifact_id = artifact_id
+
+
 class GateTimeout(FatalError):
     code = "gate_timeout"
 

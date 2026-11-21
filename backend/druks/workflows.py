@@ -478,7 +478,9 @@ async def _notify_conversation(workflow_id: str, subject: dict[str, Any]) -> boo
             channel = conversation.channel
             ask = run.input_request or {}
             if channel and channel.has_buttons and ask.get("presentation") == "in_app":
-                return await run.create_park_notification(subject, conversation_id=conversation.id)
+                return await run.create_park_notification(
+                    subject, conversation_id=conversation.id, deep_link=_get_run_link(run.id)
+                )
 
     notification_id = await DBOS.run_step_async(
         StepOptions(name="notifications.chat_park", **_IO_RETRIES), _create

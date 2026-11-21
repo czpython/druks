@@ -1,9 +1,11 @@
+import re
+
 import aiohttp
 from slack_sdk.errors import SlackApiError
 
 from druks.core.apis.slack import SlackClient
 from druks.notifications.buttons import encode_button
-from druks.notifications.constants import SECTION_TEXT_LIMIT
+from druks.notifications.constants import MARKDOWN_TEXT_LIMIT, TRUNCATION_MARKER
 from druks.notifications.exceptions import ChannelUnavailableError, DeliveryError
 
 # What Slack's answer means when the bot cannot post to the channel, and the fix.
@@ -15,6 +17,46 @@ _CHANNEL_REASONS = {
     ),
     "is_archived": "channel {channel} is archived. Choose another channel",
 }
+
+# A line that opens or closes a code fence: its indent, three or more backticks or
+# tildes, then the rest.
+_FENCE = re.compile(r"(\s*)(`{3,}|~{3,})(.*)")
+
+
+def cut_markdown(text: str, limit: int) -> str:
+    """``text`` when it fits in ``limit`` characters. Otherwise, the most whole lines of
+    ``text`` that fit with the marker after them. A code fence that those lines leave open
+    closes before the marker, so the marker and what follows it stay outside the fence.
+    When not even the first line fits, its start takes the place of the lines."""
+    if len(text) <= limit:
+        return text
+    room = limit - len(TRUNCATION_MARKER)
+    lines: list[str] = []
+    # A newline goes before each line but the first.
+    size = -1
+    open_fence = ""
+    for line in text.split("\n"):
+        fence_after = open_fence
+        if match := _FENCE.match(line):
+            indent, fence, rest = match.groups()
+            if open_fence:
+                if fence.startswith(open_fence.lstrip()) and not rest.strip():
+                    fence_after = ""
+            # Backticks with another backtick after them on the line are inline code.
+            elif fence[0] == "~" or "`" not in rest:
+                # The closer takes the opener's indent, so a fence in a list item closes in it.
+                fence_after = indent + fence
+        closing = f"\n{fence_after}" if fence_after else ""
+        if size + 1 + len(line) + len(closing) > room:
+            break
+        lines.append(line)
+        size += 1 + len(line)
+        open_fence = fence_after
+    if lines:
+        kept = "\n".join(lines).rstrip("\n")
+        return kept + (f"\n{open_fence}" if open_fence else "") + TRUNCATION_MARKER
+    # The loop stopped at the first line, so ``closing`` closes the fence that it opens.
+    return text[: room - len(closing)] + closing + TRUNCATION_MARKER
 
 
 async def deliver(
@@ -30,17 +72,16 @@ async def deliver(
     deep_link: str | None = None,
     outcome: str = "",
 ) -> dict:
-    """Each action becomes a button that carries ``token``, so a click answers this
-    notification. With ``message_ts``, Druks edits that posted message, and ``outcome``
-    takes the place of its buttons. With ``user``, only that person sees the message.
-    Returns Slack's answer, which names the message's channel and ts."""
+    """Post ``body`` as markdown, with ``deep_link`` on the line after it. Each action
+    becomes a button that carries ``token``, so a click answers this notification. With
+    ``message_ts``, Druks edits that posted message, and ``outcome`` takes the place of its
+    buttons. With ``user``, only that person sees the message. Returns Slack's answer,
+    which names the message's channel and ts."""
     link = f"\n{deep_link}" if deep_link else ""
-    # Slack refuses a section longer than this, so a long body loses its end and
+    # Slack refuses markdown longer than this, so a long body loses its end and
     # keeps the link, which opens the full text.
-    if len(body) + len(link) > SECTION_TEXT_LIMIT:
-        body = body[: SECTION_TEXT_LIMIT - len(link) - 1] + "…"
-    text = body + link
-    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
+    text = cut_markdown(body, MARKDOWN_TEXT_LIMIT - len(link)) + link
+    blocks = [{"type": "markdown", "text": text}]
     if actions:
         blocks.append(
             {
