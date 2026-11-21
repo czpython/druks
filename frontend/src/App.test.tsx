@@ -10,7 +10,12 @@ import { registerAppUI } from './apps/registry'
 
 vi.mock('./apps', () => ({}))
 vi.mock('./api/client', () => ({
-  api: { listApps: vi.fn(), getAppSettings: vi.fn() },
+  api: {
+    listApps: vi.fn(),
+    getAppSettings: vi.fn(),
+    providerSubscriptions: vi.fn().mockResolvedValue([]),
+    providerKeys: vi.fn().mockResolvedValue([]),
+  },
 }))
 vi.mock('./components/SettingsPages', () => ({ SettingsPages: () => <h1>Settings form</h1> }))
 vi.mock('./pages/DashboardPage', () => ({ DashboardPage: () => <h1>Dashboard page</h1> }))
@@ -196,16 +201,28 @@ describe('command center navigation', () => {
   it('filters the roster without removing shared destinations', async () => {
     renderApp()
     await screen.findByRole('link', { name: 'External' })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Show app search' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find an app' }), {
       target: { value: 'EXTERNAL' },
     })
     const apps = screen.getByRole('navigation', { name: 'Apps' })
     expect(within(apps).getAllByRole('link')).toHaveLength(1)
     expect(screen.getByRole('link', { name: 'Activity' })).toBeTruthy()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find an app' }), {
       target: { value: 'missing' },
     })
     expect(within(apps).getByText('No matching apps.')).toBeTruthy()
+  })
+
+  it('clears the app filter when the search is hidden', async () => {
+    renderApp()
+    await screen.findByRole('link', { name: 'External' })
+    fireEvent.click(screen.getByRole('button', { name: 'Show app search' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find an app' }), { target: { value: 'external' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Hide app search' }))
+
+    expect(screen.queryByRole('searchbox', { name: 'Find an app' })).toBeNull()
+    expect(within(screen.getByRole('navigation', { name: 'Apps' })).getAllByRole('link').length).toBeGreaterThan(1)
   })
 
   it('closes phone navigation before it opens the settings route', async () => {
@@ -307,7 +324,8 @@ describe('command center navigation', () => {
     vi.mocked(api.listApps).mockResolvedValueOnce([...roster, ...apps])
     renderApp()
     await screen.findByRole('link', { name: 'Department 39 With A Long App Name' })
-    fireEvent.change(screen.getByRole('textbox', { name: 'Find an app' }), {
+    fireEvent.click(screen.getByRole('button', { name: 'Show app search' }))
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find an app' }), {
       target: { value: 'department 39' },
     })
     expect(

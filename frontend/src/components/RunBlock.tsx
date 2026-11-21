@@ -79,7 +79,7 @@ export function RunBlock({
       {call && (
         <button
           type="button"
-          className="ins-run-link subject-run-more"
+          className="ins-run-link subject-run-more druks-button druks-button--quiet druks-button--compact"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
         >

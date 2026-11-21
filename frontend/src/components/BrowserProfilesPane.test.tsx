@@ -61,9 +61,9 @@ describe('BrowserProfilesPane', () => {
     renderPane()
     expect(screen.getByRole('status').textContent).toBe('Loading browser profiles…')
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Could not load browser profiles. Try again')
-    expect(screen.queryByText('No installed app declares a browser profile.')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'No browser profiles' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByText('No installed app declares a browser profile.')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'No browser profiles' })).toBeTruthy()
   })
   it('lists status, base-aware login actions, and refresh timestamps', async () => {
     vi.stubEnv('BASE_URL', '/druks/')

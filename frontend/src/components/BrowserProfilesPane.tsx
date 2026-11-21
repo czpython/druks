@@ -67,7 +67,7 @@ export function BrowserProfilesPane() {
       {query.isError && (
         <p className="mcp-error" role="alert">
           Could not load browser profiles.{' '}
-          <button className="set-btn ghost" onClick={() => void query.refetch()}>
+          <button className="druks-button" onClick={() => void query.refetch()}>
             Try again
           </button>
         </p>
@@ -83,12 +83,15 @@ export function BrowserProfilesPane() {
           Profiles <span className="gl-count">{sessions.length}</span>
         </h3>
         {query.isSuccess && sessions.length === 0 && (
-          <p className="mcp-help">No installed app declares a browser profile.</p>
+          <div className="druks-empty-state">
+            <h3>No browser profiles</h3>
+            <p>Profiles will appear when an installed app needs browser access.</p>
+          </div>
         )}
         {sessions.length > 0 && (
           <div className="browser-session-list">
             {sessions.map((session) => (
-              <div className="set-card browser-session-row" key={session.name}>
+              <div className="druks-panel browser-session-row" key={session.name}>
                 <div className="browser-session-identity">
                   <span className="browser-session-name">{session.name}</span>
                   {session.payloadFormat && (
@@ -113,7 +116,7 @@ export function BrowserProfilesPane() {
                   {session.isDeclared ? (
                     session.status !== 'anonymous' && (
                       <a
-                        className="set-btn primary"
+                        className="druks-button druks-button--primary"
                         href={`${import.meta.env.BASE_URL}browser-sessions/${encodeURIComponent(session.name)}/login`}
                       >
                         {LOGIN_ACTION_LABELS[session.status]}
@@ -124,7 +127,7 @@ export function BrowserProfilesPane() {
                   )}
                   {session.createdAt && (
                     <button
-                      className="set-btn danger quiet"
+                      className="druks-button druks-button--danger druks-button--quiet"
                       onClick={() => void deleteSession(session)}
                       disabled={busy}
                     >

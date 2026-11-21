@@ -12,7 +12,7 @@ export function Sidebar({
 }: {
   account: Account
   home: string
-  children: ReactNode
+  children: ReactNode | ((surface: 'desktop' | 'drawer') => ReactNode)
 }) {
   const [location] = useLocation()
   const drawer = useRef<HTMLDialogElement>(null)
@@ -31,12 +31,12 @@ export function Sidebar({
     return () => desktop.removeEventListener('change', closeOnDesktop)
   }, [])
 
-  const content = (
+  const content = (surface: 'desktop' | 'drawer') => (
     <>
       <Link href={home} className="sidebar-brand brand-lockup" aria-label="Druks home">
         <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: brandLockup }} />
       </Link>
-      {children}
+      {typeof children === 'function' ? children(surface) : children}
       <div className="sidebar-account" title={account.username}>
         {account.username}
       </div>
@@ -48,7 +48,7 @@ export function Sidebar({
       <button
         ref={opener}
         type="button"
-        className="navigation-toggle"
+        className="navigation-toggle druks-button druks-button--icon-only"
         aria-label="Open navigation"
         aria-haspopup="dialog"
         onClick={() => {
@@ -59,7 +59,7 @@ export function Sidebar({
         <Menu size={20} aria-hidden="true" />
       </button>
       <aside className="sidebar sidebar-desktop" aria-label="Druks navigation">
-        {content}
+        {content('desktop')}
       </aside>
       <dialog
         ref={drawer}
@@ -82,13 +82,13 @@ export function Sidebar({
         >
           <button
             type="button"
-            className="navigation-close"
+            className="navigation-close druks-button druks-button--icon-only"
             aria-label="Close navigation"
             onClick={() => drawer.current?.close()}
           >
             <X size={20} aria-hidden="true" />
           </button>
-          {content}
+          {content('drawer')}
         </div>
       </dialog>
     </>

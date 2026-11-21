@@ -1,0 +1,179 @@
+.page-onboarding {
+  overflow: auto;
+}
+
+.page-onboarding > .page-shell-body {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  padding-inline: var(--page-gutter);
+  padding-block: var(--druks-spacing-step-4) var(--druks-spacing-step-8);
+}
+
+.onboarding-page-topbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-block-end: var(--druks-spacing-step-7);
+}
+
+.onboarding-page-content {
+  display: grid;
+  gap: var(--druks-spacing-step-10);
+  width: min(100%, 760px);
+  margin-inline: auto;
+}
+
+.onboarding-welcome {
+  display: flex;
+  justify-content: center;
+}
+
+.onboarding-welcome .druks-chat-message {
+  max-inline-size: min(100%, 70ch);
+  gap: var(--druks-spacing-step-4);
+  border: 0;
+  background: transparent;
+  text-align: center;
+}
+
+.onboarding-welcome .druks-chat-message__meta { justify-content: center; }
+
+.onboarding-welcome-logo { --druks-identity-logo-height: var(--druks-spacing-step-13); }
+
+.onboarding-step-heading {
+  display: grid;
+  gap: var(--druks-spacing-step-2);
+  margin-block-end: var(--druks-spacing-step-5);
+}
+
+.onboarding-page-heading {
+  display: block;
+  margin: 0;
+}
+
+.onboarding-page-heading h1 {
+  color: var(--druks-color-text-primary);
+  font-weight: var(--druks-typography-selected-weight);
+}
+
+.onboarding-step-kicker {
+  margin: 0;
+}
+
+.onboarding-page-heading p { color: var(--druks-color-text-tertiary); }
+
+.onboarding-step-footer > p {
+  margin: 0;
+  color: var(--druks-color-text-tertiary);
+}
+
+.onboarding-task-list {
+  display: grid;
+  gap: var(--druks-spacing-content-gap);
+}
+
+.onboarding-task {
+  display: grid;
+  grid-template-columns: var(--druks-size-icon-large) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--druks-spacing-control-inline);
+  width: 100%;
+  padding: var(--druks-spacing-step-4);
+  color: var(--druks-color-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.onboarding-task:hover:not([aria-pressed="true"]) {
+  background: color-mix(in srgb, var(--druks-color-text-primary) var(--druks-interaction-hover-mix), var(--druks-color-surface));
+}
+
+.onboarding-task:hover { border-color: var(--druks-color-border-control); }
+
+.onboarding-task:focus-visible {
+  outline: var(--druks-size-focus-outline-width) solid var(--druks-color-accent);
+  outline-offset: var(--druks-spacing-focus-outline-offset);
+}
+
+.onboarding-task[aria-pressed="true"] {
+  background: var(--druks-color-selection-surface);
+}
+
+.onboarding-task-icon {
+  display: inline-flex;
+  color: var(--druks-color-text-tertiary);
+}
+
+.onboarding-task-icon > svg {
+  width: var(--druks-size-icon-large);
+  height: var(--druks-size-icon-large);
+}
+
+.onboarding-task-copy {
+  display: grid;
+  gap: var(--druks-spacing-step-1);
+  min-width: 0;
+}
+
+.onboarding-task-title {
+  color: var(--druks-color-text-primary);
+  font-weight: var(--druks-typography-selected-weight);
+}
+
+.onboarding-task-description {
+  color: var(--druks-color-text-tertiary);
+  line-height: var(--druks-typography-content-line-height);
+}
+
+.onboarding-task-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--druks-spacing-icon-gap);
+  color: var(--druks-color-text-tertiary);
+  font-size: var(--druks-typography-meta-size);
+  white-space: nowrap;
+}
+
+.onboarding-task-indicator > svg {
+  width: var(--druks-size-icon-small);
+  height: var(--druks-size-icon-small);
+}
+
+.onboarding-task[aria-pressed="true"] .onboarding-task-indicator {
+  color: var(--druks-color-accent);
+  font-weight: var(--druks-typography-selected-weight);
+}
+
+.onboarding-step-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--druks-spacing-step-4);
+  margin-block-start: var(--druks-spacing-step-5);
+}
+
+@media (max-width: 649px) {
+  .page-onboarding > .page-shell-body {
+    padding-block-start: var(--druks-spacing-step-2);
+  }
+
+  .onboarding-page-content {
+    gap: var(--druks-spacing-step-8);
+  }
+
+  .onboarding-task {
+    grid-template-columns: var(--druks-size-icon-medium) minmax(0, 1fr);
+    gap: var(--druks-spacing-content-gap);
+  }
+
+  .onboarding-task-icon > svg {
+    width: var(--druks-size-icon-medium);
+    height: var(--druks-size-icon-medium);
+  }
+
+  .onboarding-task-indicator {
+    grid-column: 2;
+  }
+}

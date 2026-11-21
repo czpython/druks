@@ -22,7 +22,9 @@ lint, tests, and build for PRs into `main` and `codex/` stack branches.
 
 ## Design Foundation
 
-The Druks design Foundation supplies the color tokens, the logo, and the icons.
+The Druks design Foundation supplies the design tokens, the control classes
+(`druks-button`, `druks-select`, `druks-field`, and others), the logo, and the
+icons. A link that looks like a button uses the `druks-button` classes.
 `src/foundation/` holds the stylesheet, the logo, and the license, and
 `VERSION` names the release. `public/foundation/icons/` holds the icons that
 `index.html` and `site.webmanifest` use. Do not edit these files. To update

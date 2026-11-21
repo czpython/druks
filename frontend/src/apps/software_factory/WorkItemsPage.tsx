@@ -142,14 +142,15 @@ export function WorkItemsPage() {
       }
       right={
         <div className="active-filters mono">
-          <input
-            type="text"
-            className="history-search"
-            aria-label="Filter work items"
-            placeholder="filter by ticket, title, or repo…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <label className="history-search druks-field druks-field--compact">
+            <input
+              type="search"
+              aria-label="Filter work items"
+              placeholder="filter by ticket, title, or repo…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
         </div>
       }
     />
@@ -158,11 +159,17 @@ export function WorkItemsPage() {
   return (
     <Page scroll="internal" className="page-work-items" header={head}>
       {total === 0 ? (
-        <EmptyState
-          glyph="∅"
-          msg={rows.length === 0 ? 'nothing active' : 'no matches'}
-          sub={query ? `for "${query}"` : 'all clear — check History for handed-off work'}
-        />
+        <section className="druks-panel druks-empty-state">
+          <h2>{rows.length === 0 ? 'No active work yet' : 'No work matches this search'}</h2>
+          <p>{rows.length === 0
+            ? 'Give Software Factory a task in Chat. Work that needs your attention will appear here.'
+            : `Try another ticket, title, or repository instead of “${query}”.`}</p>
+          {rows.length === 0 ? (
+            <Link className="druks-button druks-button--primary" href="/chat">Start in Chat</Link>
+          ) : (
+            <button type="button" className="druks-button druks-button--primary" onClick={() => setQuery('')}>Clear search</button>
+          )}
+        </section>
       ) : (
         <div className="work-items-list">
           <Group label="needs you" rows={needsYou} onOpen={onOpen} />

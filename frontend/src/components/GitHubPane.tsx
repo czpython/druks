@@ -41,7 +41,7 @@ export function GitHubPane() {
         </div>
       )}
       {github && connections.isSuccess && (
-        <div className="set-card svc-facts">
+        <div className="druks-panel svc-facts">
           <div className="svc-fact">
             <span className="svc-fact-key">Tag</span>
             <span className="svc-fact-val">@{github.facts.slug}</span>
@@ -54,7 +54,7 @@ export function GitHubPane() {
             <span className="svc-actions">
               {account ? (
                 <button
-                  className="set-btn danger"
+                  className="druks-button druks-button--danger"
                   onClick={() => disconnect(account.id)}
                   disabled={isBusy}
                 >
@@ -62,7 +62,7 @@ export function GitHubPane() {
                 </button>
               ) : (
                 <a
-                  className="set-btn primary"
+                  className="druks-button druks-button--primary"
                   href={`/api/oauth/github/connect?next=${encodeURIComponent(window.location.pathname)}`}
                 >
                   Connect GitHub
