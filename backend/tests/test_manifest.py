@@ -9,8 +9,6 @@ from druks.harnesses.claude import ClaudeHarness
 from druks.mcp import models
 from druks.mcp.helpers import get_bearer_token_env_var
 from druks.sandbox.datastructures import McpServer
-from druks.skills.datastructures import InstalledSkill
-from druks.skills.models import SkillCollection
 from druks.testing import make_settings, seed_call, seed_run
 from druks_field_notes.models import Note
 from druks_field_notes.workflows import Summarize
@@ -32,28 +30,12 @@ async def _build(
     return await harness.get_manifest(db_session(), mcp_servers=mcp_servers, skills=skills)
 
 
-async def _seed_skills(*names: str, disabled: tuple[str, ...] = ()) -> None:
-    collection = await SkillCollection.create(
-        db_session(),
-        source="test",
-        name="test skills",
-        skills=[
-            InstalledSkill(name=name, description=f"{name} skill", path=name, content_hash="x")
-            for name in names
-        ],
-    )
-    for skill in collection.skills:
-        if skill.name in disabled:
-            skill.enabled = False
-
-
 async def test_manifest_records_the_delivered_capability_set(druks_db):
     """Records model, harness, each MCP server's declared/delivered/token
     presence, and the delivered skills."""
     await models.McpServer.create(
         druks_db, name="linear", url=_LINEAR_URL, secret_headers={"Authorization": _TOKEN}
     )
-    await _seed_skills("alpha", "beta")
 
     linear = McpServer(name="linear", url=_LINEAR_URL, bearer_token_env_var=_LINEAR_ENV)
     github = McpServer(
@@ -156,15 +138,14 @@ async def test_hash_is_stable_for_identical_capabilities(druks_db):
     assert without_token.hash != baseline.hash
 
 
-async def test_curated_skills_change_the_recorded_set_and_the_hash(druks_db):
-    """Curated manifests omit disabled skills and hash each delivered set."""
-    await _seed_skills("alpha", "beta", disabled=("beta",))
-    with_enabled = await _build(skills=("alpha", "beta"))
-    disabled_only = await _build(skills=("beta",))
+async def test_delivered_skills_change_the_recorded_set_and_the_hash(druks_db):
+    """A manifest records the skills the call receives and hashes each set apart."""
+    with_alpha = await _build(skills=("alpha",))
+    without_skills = await _build()
 
-    assert with_enabled.skills == ("alpha",)
-    assert disabled_only.skills == ()
-    assert with_enabled.hash != disabled_only.hash
+    assert with_alpha.skills == ("alpha",)
+    assert without_skills.skills == ()
+    assert with_alpha.hash != without_skills.hash
 
 
 async def test_manifest_records_token_presence_never_the_value(druks_db):

@@ -1198,7 +1198,9 @@ repository needs the GitHub App installed on it.
 `DRUKS_SKILLS_DIR` selects the shared writable directory. Its default is
 `<DRUKS_DATA_DIR>/skills`. A call receives the enabled skills that it requests.
 If it requests none, it receives each enabled skill. A Software Factory build
-requests the recommended set from the repository profile.
+requests the recommended set from the repository profile. A call that runs as a
+saved agent, such as a [task run](chat.md#tasks), receives only the enabled
+skills picked on the agent. An agent with no picked skills gets none.
 
 Druks uploads no other
 installed skill. The capability manifest records the delivered

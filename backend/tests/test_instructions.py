@@ -9,6 +9,7 @@ from druks import instructions
 from druks.accounts.models import Account
 from druks.browser import BrowserClient, BrowserSession
 from druks.chat.service import report_quota_resume, report_quota_wait
+from druks.configured_agents.models import ConfiguredAgent
 from druks.db import db_session
 from druks.durable import AgentCall, WorkflowError
 from druks.durable.engine import _step_engine
@@ -25,6 +26,8 @@ from druks.secrets.datastructures import Audience
 from druks.secrets.enums import SecretKind
 from druks.secrets.models import VaultSecret
 from druks.services import Resource, Service
+from druks.skills.datastructures import InstalledSkill
+from druks.skills.models import Skill, SkillCollection
 from druks.usage.models import UsageScrape
 from druks.user_settings.models import SettingsOverride
 from druks.workspaces import Workspace
@@ -293,6 +296,74 @@ async def test_declaration_drives_run_agent_call(druks_db, tmp_path, monkeypatch
     assert kwargs["include_plugins"] is True
     assert kwargs["hooks"] == {}
     assert "model" not in kwargs
+
+
+async def _install_skills() -> None:
+    await SkillCollection.create(
+        db_session(),
+        source="https://github.com/o/r",
+        name="o/r",
+        skills=[
+            InstalledSkill(name="alpha", description="one", path="/p/alpha", content_hash="a"),
+            InstalledSkill(name="beta", description="two", path="/p/beta", content_hash="b"),
+        ],
+    )
+
+
+async def _create_agent(skills: list[str]) -> ConfiguredAgent:
+    await _install_skills()
+    return await ConfiguredAgent.create(
+        db_session(),
+        owner=await Account.get_default(db_session()),
+        name="Price watcher",
+        description="Watches prices.",
+        instructions="Report prices in euros.",
+        skills=skills,
+        harness="claude",
+        model="anthropic/claude-sonnet-4-6",
+        is_private=True,
+    )
+
+
+async def test_a_call_as_an_agent_runs_its_model_with_its_skills(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    agent = await _create_agent(skills=["alpha"])
+
+    await DUMMY_AGENT._run(workflow_id="wf-9", agent=agent)
+
+    harness, manifest = sandbox.run_agent.await_args.args
+    assert harness.model == "anthropic/claude-sonnet-4-6"
+    assert manifest.skills == ("alpha",)
+
+
+async def test_a_call_as_an_agent_with_no_skills_gets_none(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    agent = await _create_agent(skills=[])
+
+    await DUMMY_AGENT._run(workflow_id="wf-9", agent=agent)
+
+    _, manifest = sandbox.run_agent.await_args.args
+    assert manifest.skills == ()
+
+
+async def test_a_call_without_an_agent_gets_every_enabled_skill(
+    druks_db, tmp_path, monkeypatch, current_run
+):
+    sandbox = _patch_runtime(monkeypatch, tmp_path, {"ok": True})
+    _patch_ephemeral(monkeypatch, sandbox)
+    await _install_skills()
+    (await Skill.get(db_session(), "beta")).enabled = False
+
+    await DUMMY_AGENT._run(workflow_id="wf-9")
+
+    _, manifest = sandbox.run_agent.await_args.args
+    assert manifest.skills == ("alpha",)
 
 
 async def test_declared_plugin_choice_is_forwarded(druks_db, tmp_path, monkeypatch, current_run):
@@ -936,6 +1007,43 @@ async def test_body_level_quota_waits_for_the_reset_once(
     calls = await AgentCall.list_for_run(db_session(), "wf-9")
     assert len(calls) == 2
     assert all(call.failure_code == "rate_limited" for call in calls)
+
+
+async def test_a_quota_wait_as_an_agent_reads_the_agents_model(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessRateLimitError
+
+    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
+    failures = [HarnessRateLimitError("quota"), None]
+    _patch_quota(monkeypatch, tmp_path, current_run, failures, now=now)
+    monkeypatch.setattr(instructions, "set_run_phase", AsyncMock())
+    wait_out_quota = AsyncMock(return_value=False)
+    monkeypatch.setattr(instructions.Instruction, "_wait_out_quota", wait_out_quota)
+    agent = await _create_agent(skills=[])
+
+    await DUMMY_AGENT(agent=agent)
+
+    _, quota, _ = wait_out_quota.await_args.args
+    assert quota["model"] == "anthropic/claude-sonnet-4-6"
+
+
+async def test_a_quota_wait_as_an_agent_woken_without_a_switch_keeps_waiting(
+    druks_db, tmp_path, monkeypatch, current_run, _inline_agent_steps
+):
+    from druks.harnesses.exceptions import HarnessRateLimitError
+
+    now = datetime(2026, 8, 1, 10, tzinfo=UTC)
+    _patch_quota(
+        monkeypatch, tmp_path, current_run, [HarnessRateLimitError("quota"), None], now=now
+    )
+    current_run.sleep = AsyncMock(side_effect=[True, False])
+    agent = await _create_agent(skills=[])
+
+    await DUMMY_AGENT(agent=agent)
+
+    assert current_run.sleep.await_count == 2
+    assert current_run.sleep.await_args.args == (60 * 60 + 90.0,)
 
 
 async def test_a_quota_wait_woken_without_a_switch_waits_out_its_reset(

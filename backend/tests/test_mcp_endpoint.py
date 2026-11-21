@@ -210,6 +210,7 @@ async def test_tools_list_pins_platform_and_app_tools(app, pat_token, mode):
         "chat_read_file",
         "chat_require_tag",
         "chat_ask",
+        "chat_run_instruction",
         "chat_start_conversation",
         "chat_list_reminders",
         "chat_create_reminder",

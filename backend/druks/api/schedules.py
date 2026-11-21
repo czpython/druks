@@ -35,10 +35,11 @@ async def create_schedule(
     account: Account = Depends(current_account),
 ) -> Schedule:
     """Call one of your tools again and again on a cron, as the person in this chat, such
-    as a tool that starts a run. Each call checks what it checks when you make it, and
-    its runs report to this chat. Local time is the installation timezone. The answer's
-    nextRunAt is local: tell the person that time as it is. When Druks refuses the time,
-    ask the person rather than guess."""
+    as a tool that starts a run. When none of your tools does the task, schedule
+    chat_run_instruction with the task in words. Each call checks what it checks when
+    you make it, and its runs report to this chat. Local time is the installation
+    timezone. The answer's nextRunAt is local: tell the person that time as it is. When
+    Druks refuses the time, ask the person rather than guess."""
     conversation_id = current_conversation_id.get()
     if not conversation_id:
         raise HTTPException(422, "Make a schedule from a chat. This call comes from no chat.")
