@@ -8,11 +8,21 @@ from druks.accounts.dependencies import current_account
 from druks.accounts.models import Account
 from druks.api.dependencies import SessionDep
 from druks.api.schemas import ScheduleResponse
-from druks.durable.exceptions import ScheduleError
 from druks.durable.models import Schedule
 from druks.durable.schedules import apply_schedule
+from druks.exceptions import PermissionDenied
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
+
+
+async def require_schedule_stopper(
+    request: Request, session: SessionDep, account: Account = Depends(current_account)
+) -> None:
+    """The caller must be the schedule's owner or an admin. An unknown schedule is the
+    route's to answer."""
+    schedule = await session.get(Schedule, request.path_params["schedule_id"])
+    if schedule and not account.can_stop(schedule):
+        raise PermissionDenied("Only the schedule's owner or an admin can stop it.")
 
 
 @router.post(
@@ -43,18 +53,15 @@ async def create_schedule(
     conversation_id = current_conversation_id.get()
     if not conversation_id:
         raise HTTPException(422, "Make a schedule from a chat. This call comes from no chat.")
-    try:
-        schedule = await Schedule.create(
-            session,
-            account_id=account.id,
-            conversation_id=conversation_id,
-            tool=tool,
-            arguments=arguments,
-            cron=cron,
-            tool_names=request.app.state.agent_tools.values(),
-        )
-    except ScheduleError as error:
-        raise HTTPException(422, str(error)) from error
+    schedule = await Schedule.create(
+        session,
+        account_id=account.id,
+        conversation_id=conversation_id,
+        tool=tool,
+        arguments=arguments,
+        cron=cron,
+        tool_names=request.app.state.agent_tools.values(),
+    )
     await apply_schedule(schedule)
     await session.commit()
     await session.refresh(schedule)
@@ -100,15 +107,12 @@ async def change_schedule(
     schedule = await Schedule.get_for_account(session, schedule_id, account.id)
     if not schedule:
         raise HTTPException(404, "Schedule not found. Choose one from list_schedules.")
-    try:
-        schedule.change(
-            tool=tool,
-            arguments=arguments,
-            cron=cron,
-            tool_names=request.app.state.agent_tools.values(),
-        )
-    except ScheduleError as error:
-        raise HTTPException(422, str(error)) from error
+    schedule.change(
+        tool=tool,
+        arguments=arguments,
+        cron=cron,
+        tool_names=request.app.state.agent_tools.values(),
+    )
     await apply_schedule(schedule)
     await session.commit()
     await session.refresh(schedule)
@@ -120,17 +124,16 @@ async def change_schedule(
     operation_id="stop_schedule",
     status_code=204,
     tags=["agent"],
+    dependencies=[Depends(require_schedule_stopper)],
 )
 async def stop_schedule(
     session: SessionDep,
     schedule_id: Annotated[str, Path(description="A schedule from list_schedules.")],
-    account: Account = Depends(current_account),
 ) -> None:
     """Stop one of your schedules. The runs its calls already started go on."""
     schedule = await session.get(Schedule, schedule_id)
     if not schedule:
         raise HTTPException(404, "Schedule not found. Choose one from list_schedules.")
-    schedule.check_stopper(account)
     await DBOS.delete_schedule_async(schedule.schedule_name)
     await session.delete(schedule)
     await session.commit()

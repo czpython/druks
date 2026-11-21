@@ -113,6 +113,9 @@
 .teams-table thead th:nth-child(3) { width: 20%; }
 .teams-table thead th:last-child { width: 180px; }
 .teams-table td span { display: block; }
+.agents-table thead th:first-child { width: 22%; }
+.agents-table thead th:nth-child(2) { width: auto; }
+.agents-table thead th:last-child { width: 180px; }
 .connection-name { display: block; color: var(--druks-color-text-primary); font-weight: 500; }
 .connection-context { display: block; margin-top: 6px; color: var(--druks-color-text-tertiary); font-size: 13px; }
 .connection-actions .set-btn { white-space: nowrap; }

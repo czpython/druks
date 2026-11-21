@@ -180,7 +180,7 @@ function ConversationThread({ id, account, summary, onPin, pinPending, draft, on
   const composer = useRef<HTMLTextAreaElement>(null)
   const format = useFormatters()
   const apps = useQuery({ queryKey: ['apps'], queryFn: api.listApps, enabled: !id, staleTime: 60_000 })
-  const agents = useQuery({ queryKey: ['configuredAgents'], queryFn: api.configuredAgents, enabled: !id })
+  const agents = useQuery({ queryKey: ['agents'], queryFn: api.agents, enabled: !id })
   // An admin sees every agent, but only its owner talks to a private agent.
   const talkableAgents = (agents.data ?? []).filter((agent) => !agent.isPrivate || agent.ownerId === account.id)
   const [agentId, setAgentId] = useState('')

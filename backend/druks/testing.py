@@ -25,8 +25,8 @@ with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as _settings_file
 os.environ.setdefault("DRUKS_CONFIG", str(_settings_path))
 os.environ.setdefault("DRUKS_SECRETS_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
 
+import druks.agents.models  # noqa: F401
 import druks.browser.models  # noqa: F401
-import druks.configured_agents.models  # noqa: F401
 import druks.durable.models  # noqa: F401
 import druks.files.models  # noqa: F401
 import druks.harnesses.models  # noqa: F401

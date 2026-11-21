@@ -38,7 +38,7 @@ import { appHome, appLabel, appOwning, getAppUI, registeredApps } from './apps/r
 
 const ROUTER_BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 const SHELL_PAGES: Record<string, string> = {
-  '/': 'Dashboard', '/events': 'Activity', '/usage': 'Usage', '/schedules': 'Schedules', '/agents': 'Agents',
+  '/': 'Dashboard', '/events': 'Activity', '/usage': 'Usage', '/schedules': 'Schedules',
 }
 
 export function App({ account }: { account: Account }) {
@@ -291,7 +291,8 @@ function AppShell({
     appLabel(name).toLowerCase().includes(search.toLowerCase().trim()),
   )
   const isChat = location === '/chat' || location.startsWith('/chat/')
-  const title = isChat ? 'Chat' : SHELL_PAGES[location] ?? (location.startsWith('/agents/') ? 'Agents' : app ? appLabel(app) : 'Druks')
+  const isAgents = location === '/agents' || location.startsWith('/agents/')
+  const title = isChat ? 'Chat' : isAgents ? 'Agents' : SHELL_PAGES[location] ?? (app ? appLabel(app) : 'Druks')
 
   return (
     <div className="command-center" hidden={hidden}>
@@ -340,7 +341,7 @@ function AppShell({
             <Link
               href="/agents"
               className="sidebar-link"
-              aria-current={location === '/agents' ? 'page' : undefined}
+              aria-current={isAgents ? 'page' : undefined}
             >
               <Bot size={17} aria-hidden="true" />
               Agents

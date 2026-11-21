@@ -750,7 +750,7 @@ describe('SettingsPages instructions', () => {
     expect(screen.queryByText('default model')).toBeNull()
   })
 
-  it('renders the defaults, the unattended-runs account, and every agent resolved', async () => {
+  it('renders the defaults, the unattended-runs account, and every instruction resolved', async () => {
     stubFetch()
     renderSettings()
     fireEvent.click(await screen.findByRole('link', { name: 'Instructions' }))
@@ -1216,12 +1216,12 @@ describe('canonical app settings', () => {
   })
 
   it.each([
-    { hasAgents: true, hasBot: false, channels: ['whatsapp'], tabs: [] },
-    { hasAgents: false, hasBot: true, channels: ['whatsapp'], tabs: ['Bots', 'Channels'] },
-    { hasAgents: true, hasBot: true, channels: ['whatsapp'], tabs: ['Instructions', 'Bots', 'Channels'] },
-    { hasAgents: true, hasBot: true, channels: [], tabs: ['Instructions', 'Bots'] },
-    { hasAgents: false, hasBot: false, channels: ['whatsapp'], tabs: [] },
-  ])('shows settings tabs for agents=$hasAgents, bot=$hasBot, and channels=$channels', async ({ hasAgents, hasBot, channels, tabs }) => {
+    { hasInstructions: true, hasBot: false, channels: ['whatsapp'], tabs: [] },
+    { hasInstructions: false, hasBot: true, channels: ['whatsapp'], tabs: ['Bots', 'Channels'] },
+    { hasInstructions: true, hasBot: true, channels: ['whatsapp'], tabs: ['Instructions', 'Bots', 'Channels'] },
+    { hasInstructions: true, hasBot: true, channels: [], tabs: ['Instructions', 'Bots'] },
+    { hasInstructions: false, hasBot: false, channels: ['whatsapp'], tabs: [] },
+  ])('shows settings tabs for instructions=$hasInstructions, bot=$hasBot, and channels=$channels', async ({ hasInstructions, hasBot, channels, tabs }) => {
     const helpdesk = {
       ...appSettings.apps[2]!,
       name: 'helpdesk',
@@ -1229,14 +1229,14 @@ describe('canonical app settings', () => {
       bot: hasBot ? 'helpdesk.bot' : null,
       botAccess: hasBot ? 'public' as const : null,
       agents: [
-        ...(hasAgents ? [{ ...coder, name: 'helpdesk.coder' }] : []),
+        ...(hasInstructions ? [{ ...coder, name: 'helpdesk.coder' }] : []),
         ...(hasBot ? [{ ...coder, name: 'helpdesk.bot', label: 'bot' }] : []),
       ],
-      settings: hasAgents || hasBot ? [] : appSettings.apps[2]!.settings,
+      settings: hasInstructions || hasBot ? [] : appSettings.apps[2]!.settings,
     }
     stubFetch(true, undefined, { ...appSettings, apps: [...appSettings.apps, helpdesk], channels })
     renderSettings('/apps/helpdesk/settings')
-    if (hasAgents) {
+    if (hasInstructions) {
       expect(await screen.findByRole('region', { name: 'coder' })).toBeTruthy()
       expect(screen.queryByRole('region', { name: 'bot' })).toBeNull()
     }
@@ -1253,7 +1253,7 @@ describe('canonical app settings', () => {
         expect(window.location.pathname).toBe('/apps/helpdesk/settings/channels')
       }
     } else {
-      if (!hasAgents) await screen.findByLabelText('Notebook')
+      if (!hasInstructions) await screen.findByLabelText('Notebook')
       expect(screen.queryByRole('navigation', { name: 'App settings sections' })).toBeNull()
     }
   })
@@ -1340,7 +1340,7 @@ describe('canonical app settings', () => {
     expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull()
   })
 
-  it('keeps Options, Agents, and Bots drafts together and sends only that app', async () => {
+  it('keeps Options, Instructions, and Bots drafts together and sends only that app', async () => {
     const settings = structuredClone(appSettings)
     const factory = settings.apps[0]!
     factory.bot = 'software_factory.bot'
@@ -1478,7 +1478,7 @@ describe('settings resource read failures', () => {
     },
   )
 
-  it('retries a failed Preferences read without blocking Agents', async () => {
+  it('retries a failed Preferences read without blocking Instructions', async () => {
     stubFetch(false)
     const original = api.getPersonalSettings
     const request = vi.spyOn(api, 'getPersonalSettings').mockRejectedValue(new Error('Offline'))
@@ -1603,7 +1603,7 @@ describe('settings resource read failures', () => {
     'accounts',
     'instructions',
   ] as const)(
-    'shows a failed %s read on Agents and retries without false choices',
+    'shows a failed %s read on Instructions and retries without false choices',
     async (method) => {
       stubFetch(false)
       const original = api[method]
@@ -1613,7 +1613,7 @@ describe('settings resource read failures', () => {
         .mockImplementation(original)
       renderSettings('/settings/instructions')
       const alert = await screen.findByRole('alert')
-      expect(alert.textContent).toContain('Could not load agent configuration.')
+      expect(alert.textContent).toContain('Could not load execution settings.')
       expect(screen.queryByText(/Choose a model with a connected credential/)).toBeNull()
       expect(screen.queryByLabelText('Unattended runs use')).toBeNull()
       fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
@@ -1623,7 +1623,7 @@ describe('settings resource read failures', () => {
     },
   )
 
-  it('gates app Agents on failed model reads and retains its Options draft', async () => {
+  it('gates app Instructions on failed model reads and retains its Options draft', async () => {
     stubFetch(false)
     vi.spyOn(api, 'providerCatalogs').mockRejectedValue(new Error('Offline'))
     renderSettings('/apps/software_factory/settings')
@@ -1633,7 +1633,7 @@ describe('settings resource read failures', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Instructions' }))
     expect(await screen.findByRole('alert')).toHaveProperty(
       'textContent',
-      'Could not load agent configuration. Try again',
+      'Could not load execution settings. Try again',
     )
     expect(screen.queryByText('coder')).toBeNull()
     fireEvent.click(screen.getByRole('link', { name: 'Options' }))
@@ -1791,7 +1791,7 @@ it('keeps focus on another agent field after saving an app reached through searc
 })
 
 
-it('saves a personal timezone and keeps execution controls in Agents', async () => {
+it('saves a personal timezone and keeps execution controls in Instructions', async () => {
   stubFetch()
   renderSettings('/settings/personal')
   const timezone = await screen.findByRole('combobox', { name: 'Timezone' })

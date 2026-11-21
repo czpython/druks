@@ -1,5 +1,7 @@
+from druks.agents.constants import PRIVATE_AGENT_MESSAGE
 from druks.durable.engine import step_session
-from druks.workflows import Workflow
+from druks.exceptions import PermissionDenied
+from druks.workflows import FatalError, Workflow
 
 from .app import Chat
 from .models import Conversation
@@ -13,10 +15,12 @@ class RunInstruction(Workflow):
     async def run(self, instruction: str) -> dict[str, str]:
         async with step_session() as session:
             conversation = await session.get(Conversation, self.conversation_id)
+        if not conversation:
+            raise FatalError("The conversation was deleted with its agent.")
         agent = conversation.agent
-        if agent:
-            # The agent can change owner or turn private after the conversation began.
-            agent.check_talker(conversation.account)
+        # The agent can change owner or turn private after the conversation began.
+        if agent and not conversation.account.can_talk_to(agent):
+            raise PermissionDenied(PRIVATE_AGENT_MESSAGE)
         answer = await Chat.run_instruction(
             agent=agent,
             agent_instructions=agent.instructions if agent else "",

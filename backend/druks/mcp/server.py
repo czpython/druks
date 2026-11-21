@@ -244,6 +244,14 @@ def _install_app_namespacing(api: FastAPI, app_names: set[str]) -> None:
         for route in iter_route_contexts(api.routes)
         if isinstance(route.original_route, APIRoute) and _TOOL_TAGS & set(route.tags)
     }
+    # An agent's page lists a schedule only to an account that can use its tool's app.
+    api.state.tool_apps = {
+        get_tool_name(route.operation_id, list(route.tags), app_names): next(
+            (tag for tag in route.tags if tag in app_names), None
+        )
+        for route in iter_route_contexts(api.routes)
+        if isinstance(route.original_route, APIRoute) and _TOOL_TAGS & set(route.tags)
+    }
     generate = api.openapi
 
     def namespaced() -> dict:

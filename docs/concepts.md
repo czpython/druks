@@ -1,6 +1,6 @@
 ---
 title: "Concepts and guarantees"
-description: "Understand Druks ownership boundaries, durable recovery, gates, agents, events, and access topology."
+description: "Understand Druks ownership boundaries, durable recovery, gates, instructions, events, and access topology."
 icon: "blocks"
 ---
 
@@ -13,7 +13,7 @@ time and can cause a side effect again. One long-lived process does not provide
 recovery.
 
 Druks separates durable control flow from app code. DBOS records workflow
-progress in Postgres. Druks layers workflows, agents, gates, subjects, events,
+progress in Postgres. Druks layers workflows, instructions, gates, subjects, events,
 settings, and app loading on top, then exposes their state through an API and
 dashboard.
 
@@ -273,7 +273,7 @@ Configuration has two planes:
 
 - **Deployment:** `druks.toml` configures the deployment and creates the process environment.
 - Postgres settings configure installation defaults, personal preferences,
-  app and workflow settings, agent overrides, notifications, MCP servers, and skills.
+  app and workflow settings, instruction overrides, notifications, MCP servers, and skills.
   See [personal and installation settings](configuration.md#personal-and-installation-settings)
   for execution defaults and timezone rules.
 

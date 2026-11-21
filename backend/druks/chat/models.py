@@ -26,7 +26,7 @@ from .enums import ConversationSource, MessageRole, MessageState
 from .exceptions import ReminderError
 
 if TYPE_CHECKING:
-    from druks.configured_agents.models import ConfiguredAgent
+    from druks.agents.models import Agent
 
     from .channels.base import Channel
 
@@ -105,6 +105,11 @@ class Conversation(Base, Uuid7Pk):
             postgresql_where=text("connection_id IS NOT NULL"),
             postgresql_nulls_not_distinct=True,
         ),
+        Index(
+            "chat_conversations_agent_idx",
+            "agent_id",
+            postgresql_where=text("agent_id IS NOT NULL"),
+        ),
     )
 
     account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
@@ -129,7 +134,7 @@ class Conversation(Base, Uuid7Pk):
     session_file: Mapped[File | None] = FileField()
     # The saved agent that answers instead of the Bot.
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
-    agent: Mapped["ConfiguredAgent | None"] = relationship(lazy="joined")
+    agent: Mapped["Agent | None"] = relationship(lazy="joined")
     created_at: Mapped[datetime] = mapped_column(default=Base.utc_now)
     messages: Mapped[list[Message]] = relationship(
         order_by=(Message.created_at, Message.id), viewonly=True
@@ -234,9 +239,14 @@ class Conversation(Base, Uuid7Pk):
         """The conversation of a person in a thread on a channel's connection that they
         last wrote in. An agent's late reply does not make its conversation the latest,
         and a bare tag's empty conversation comes last."""
+        # A run's report arrives in the person's role, so only what they wrote counts.
         last_written_at = (
             select(func.max(Message.created_at))
-            .where(Message.conversation_id == cls.id, Message.role == MessageRole.USER)
+            .where(
+                Message.conversation_id == cls.id,
+                Message.role == MessageRole.USER,
+                ~Message.is_internal,
+            )
             .scalar_subquery()
         )
         return await session.scalar(

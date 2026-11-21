@@ -14,7 +14,7 @@ from drukbox_sdk import Secret
 from druks import instructions
 from druks.accounts.models import Account
 from druks.apps import App
-from druks.apps.registry import instructions as agent_registry
+from druks.apps.registry import instructions as instruction_registry
 from druks.db import db_session
 from druks.durable.models import AgentCall
 from druks.harnesses import providers as provider_module
@@ -471,7 +471,7 @@ async def test_two_apps_declare_the_same_agent_name(druks_db):
         ]
     finally:
         for app in (Ticketing, BugHunter):
-            agent_registry._items.pop(app.file_tickets.id)
+            instruction_registry._items.pop(app.file_tickets.id)
 
     assert (Ticketing.file_tickets.id, BugHunter.file_tickets.id) == (
         "ticketing.file_tickets",

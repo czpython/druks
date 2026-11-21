@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
 import type { Account, AgentSchedule, RunSummary } from '../api/types'
+import { UserPreferencesProvider } from '../lib/preferences'
 import { AgentPage } from './AgentPage'
 
 const admin: Account = { id: 'admin', username: 'admin@example.com', isDefault: true, role: 'admin' }
@@ -51,17 +52,19 @@ function run(id: string, costs: number[]): RunSummary {
   }
 }
 
-function renderPage(account: Account) {
+function renderPage(account: Account, timezone?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const page = <AgentPage id="agent-1" account={account} />
+  if (timezone) vi.spyOn(api, 'getPersonalSettings').mockResolvedValue({ timezone, theme: 'system', notificationChannelId: null, isTagRequired: false })
   render(
     <QueryClientProvider client={queryClient}>
-      <AgentPage id="agent-1" account={account} />
+      {timezone ? <UserPreferencesProvider accountId={account.id}>{page}</UserPreferencesProvider> : page}
     </QueryClientProvider>,
   )
 }
 
 beforeEach(() => {
-  vi.spyOn(api, 'configuredAgent').mockResolvedValue({
+  vi.spyOn(api, 'agent').mockResolvedValue({
     id: 'agent-1',
     name: 'Reviewer',
     description: 'Reviews pull requests',
@@ -71,15 +74,16 @@ beforeEach(() => {
     model: 'claude-opus',
     isPrivate: false,
     ownerId: 'admin',
-    slackChannelId: null,
+    channelId: null,
     pictureUrl: null,
   })
   vi.spyOn(api, 'accounts').mockResolvedValue([admin, member])
-  vi.spyOn(api, 'configuredAgentSchedules').mockResolvedValue([
+  vi.spyOn(api, 'agentSchedules').mockResolvedValue([
     schedule('mine', 'member'),
     schedule('theirs', 'admin'),
   ])
-  vi.spyOn(api, 'configuredAgentRuns').mockResolvedValue([])
+  vi.spyOn(api, 'agentRuns').mockResolvedValue([])
+  vi.spyOn(api, 'agentCost').mockResolvedValue({ costUsd: 0 })
 })
 
 afterEach(() => {
@@ -113,11 +117,11 @@ describe('AgentPage', () => {
     fireEvent.click(within(table).getByRole('button', { name: 'Stop' }))
 
     expect((await screen.findByRole('alert')).textContent).toBe('Schedule not found.')
-    await waitFor(() => expect(api.configuredAgentSchedules).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.agentSchedules).toHaveBeenCalledTimes(2))
   })
 
   it('offers to try again when the schedules cannot load', async () => {
-    vi.spyOn(api, 'configuredAgentSchedules').mockRejectedValueOnce(new Error('Server error'))
+    vi.spyOn(api, 'agentSchedules').mockRejectedValueOnce(new Error('Server error'))
 
     renderPage(member)
     fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
@@ -132,20 +136,30 @@ describe('AgentPage', () => {
     expect(within(table).getAllByRole('button', { name: 'Stop' })).toHaveLength(2)
   })
 
-  it("lists the agent's runs with their cost and totals this week's cost", async () => {
+  it("lists the agent's runs with their cost and shows this week's cost", async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date(2026, 10, 20, 12))
-    const monday = new Date(2026, 10, 16).toISOString()
-    vi.spyOn(api, 'configuredAgentRuns').mockImplementation(async (_agentId, query) =>
-      query?.since ? [run('a', [1.25, 0.5]), run('b', [2])] : [run('a', [1.25, 0.5])],
-    )
+    // Sunday 22:00 in New York is Monday in UTC.
+    vi.setSystemTime(new Date('2026-11-23T03:00:00Z'))
+    vi.spyOn(api, 'agentRuns').mockResolvedValue([run('a', [1.25, 0.5])])
+    vi.spyOn(api, 'agentCost').mockResolvedValue({ costUsd: 3.75 })
 
-    renderPage(member)
+    renderPage(member, 'America/New_York')
     const table = await screen.findByRole('table', { name: 'Runs' })
 
     expect(within(table).getByRole('link', { name: 'Summarize a' }).getAttribute('href')).toBe('/runs/a')
     expect(within(table).getByText('$1.75')).toBeTruthy()
     expect(await screen.findByText('$3.75')).toBeTruthy()
-    expect(api.configuredAgentRuns).toHaveBeenCalledWith('agent-1', { since: monday, limit: '100' })
+    await waitFor(() =>
+      expect(api.agentCost).toHaveBeenCalledWith('agent-1', '2026-11-16T05:00:00.000Z'),
+    )
+  })
+
+  it('shows only the error when the agent cannot load', async () => {
+    vi.spyOn(api, 'agent').mockRejectedValue(new Error('No agent with id agent-1.'))
+
+    renderPage(member)
+
+    expect((await screen.findByRole('alert')).textContent).toBe('No agent with id agent-1.')
+    expect(screen.queryByRole('heading', { name: 'Schedules' })).toBeNull()
   })
 })

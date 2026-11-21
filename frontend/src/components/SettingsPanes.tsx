@@ -19,7 +19,7 @@ import {
   type Harness,
   type Account,
   type AgentSetting,
-  type AgentsResponse,
+  type InstructionsResponse,
   type AppSettingChoices,
   type AppSettings,
   type Billing,
@@ -530,7 +530,7 @@ export function PreferencesPane({
   )
 }
 
-export function AgentsPane({
+export function InstructionsPane({
   defaults,
   onDefaults,
   accounts,
@@ -546,7 +546,7 @@ export function AgentsPane({
   defaults: Defaults
   onDefaults: (next: Defaults) => void
   accounts: Account[]
-  resolved: AgentsResponse
+  resolved: InstructionsResponse
   harnessByName: Record<string, Harness>
   harnessColor: Record<string, string>
   catalog: Catalog
@@ -737,11 +737,11 @@ export function AgentsPane({
       </section>
 
       <div className="set-group">
-        <div className="set-group-label">Resolved agents</div>
-        <p className="set-field-help">These agents use the installation defaults and shared app overrides.</p>
-        <div className="set-table agents-table">
+        <div className="set-group-label">Resolved instructions and bots</div>
+        <p className="set-field-help">These instructions and bots use the installation defaults and shared app overrides.</p>
+        <div className="set-table instructions-table">
           <div className="set-thead">
-            <div>agent</div>
+            <div>name</div>
             <div>harness</div>
             <div>model</div>
             <div>billing</div>

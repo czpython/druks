@@ -9,6 +9,7 @@ from contextlib import suppress
 from datetime import datetime, timedelta
 from operator import attrgetter
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -18,11 +19,11 @@ from pydantic_core import to_json
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from druks.accounts.enums import AccountKind
+from druks.agents.constants import PRIVATE_AGENT_MESSAGE
 from druks.apps.loader import get_app
 from druks.apps.registry import services
 from druks.durable.engine import step_session
 from druks.durable.models import Run
-from druks.exceptions import PermissionDenied
 from druks.files.constants import MAX_UPLOAD_BYTES
 from druks.files.datastructures import File
 from druks.files.storage import get_file_storage
@@ -53,7 +54,6 @@ from druks.secrets.models import VaultSecret
 from druks.services import Connection
 from druks.services.exceptions import ServiceNotConnectedError
 from druks.settings import get_settings
-from druks.skills.models import Skill
 from druks.workspaces import Workspace
 
 from .bots.constants import ADMIN_PROMPT, ADMIN_TOOLS, THREAD_PROMPT, THREAD_TOOLS
@@ -89,6 +89,9 @@ from .exceptions import (
 )
 from .models import Conversation, Message
 from .services import SpeechToText
+
+if TYPE_CHECKING:
+    from druks.instructions import Bot
 
 logger = logging.getLogger(__name__)
 
@@ -132,18 +135,10 @@ async def get_agent(
     """The conversation's agent: its Bot's id, its system prompt, and the tools its key
     allows. ``sign_ins`` are the facts of ``list_sign_ins``, for an operator."""
     account_type = conversation.account.kind
-    # A web conversation belongs to Chat.
-    app = "chat"
-    if conversation.connection:
-        app = conversation.connection.identity.get("app", app)
-    bot = get_app(app).bot
-    template, tools = bot.prompt, Toolkit.ALL
-    if account_type == AccountKind.BOT:
-        tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
+    bot = _get_bot(conversation)
+    template = bot.prompt
     if account_type == AccountKind.BOT_ADMIN:
         template = ADMIN_PROMPT
-        admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
-        tools = (*admin_tools, *ADMIN_TOOLS)
     is_shared_thread = bool(conversation.thread_id) and conversation.channel.has_readable_threads
     context = {
         "source": conversation.source,
@@ -160,11 +155,34 @@ async def get_agent(
         context.update(await conversation.channel.get_prompt_context(session, conversation))
     prompt = await render_prompt(template, **context)
     if is_shared_thread and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN):
-        tools = (*tools, *THREAD_TOOLS)
         prompt = f"{prompt}\n\n{THREAD_PROMPT}"
     if conversation.agent:
         prompt = f"{prompt}\n\n{conversation.agent.instructions}"
-    return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", tools
+    return bot.id, f"{prompt}\n\n{INTERNAL_MESSAGES_PROMPT}", get_agent_tools(conversation)
+
+
+def get_agent_tools(conversation: Conversation) -> AllowedTools:
+    """The tools that the key of the conversation's agent allows."""
+    account_type = conversation.account.kind
+    bot = _get_bot(conversation)
+    tools = Toolkit.ALL
+    if account_type == AccountKind.BOT:
+        tools = tuple(get_tool_name(name, [bot.app], {bot.app}) for name in bot.user_tools)
+    if account_type == AccountKind.BOT_ADMIN:
+        admin_tools = (get_tool_name(name, [bot.app], {bot.app}) for name in bot.admin_tools)
+        tools = (*admin_tools, *ADMIN_TOOLS)
+    is_shared_thread = bool(conversation.thread_id) and conversation.channel.has_readable_threads
+    if is_shared_thread and account_type in (AccountKind.BOT, AccountKind.BOT_ADMIN):
+        tools = (*tools, *THREAD_TOOLS)
+    return tools
+
+
+def _get_bot(conversation: Conversation) -> "Bot":
+    # A web conversation belongs to Chat.
+    app = "chat"
+    if conversation.connection:
+        app = conversation.connection.identity.get("app", app)
+    return get_app(app).bot
 
 
 async def list_sign_ins(session: AsyncSession, account_id: str) -> list[dict]:
@@ -417,13 +435,13 @@ async def deliver_pending(session: AsyncSession, conversation: Conversation) -> 
                             )
                             connections.append(Connection(service, row))
                 sign_ins = await list_sign_ins(session, conversation.account_id)
-            bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
             if conversation.agent:
-                # The agent can change owner or turn private after the conversation began.
-                try:
-                    conversation.agent.check_talker(conversation.account)
-                except PermissionDenied as error:
-                    raise ChatAgentRefusedError(f"The agent cannot answer: {error}") from error
+                # One delivery sends several turns, and each turn reads the agent again.
+                await session.refresh(conversation.agent)
+            bot_id, prompt, tools = await get_agent(session, conversation, sign_ins=sign_ins)
+            # The agent can change owner or turn private after the conversation began.
+            if conversation.agent and not conversation.account.can_talk_to(conversation.agent):
+                raise ChatAgentRefusedError(f"The agent cannot answer: {PRIVATE_AGENT_MESSAGE}")
             try:
                 if conversation.agent:
                     config = await conversation.agent.get_config(session)
@@ -522,8 +540,7 @@ async def send_turn(
         )
     skills: list[str] = []
     if conversation.agent and config.harness_class.skills_folder:
-        enabled = {skill.name for skill in await Skill.list_enabled(session)}
-        skills = [name for name in conversation.agent.skills if name in enabled]
+        skills = await conversation.agent.list_enabled_skills(session)
         folder = f"{sandbox_home}/{config.harness_class.skills_folder}"
         # The box keeps the names Druks put in it. A skill removed from Druks has no row
         # left, so only this record says it must leave the box. Nothing else in the

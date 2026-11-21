@@ -30,7 +30,9 @@ from druks.secrets.models import VaultSecret
 from druks.settings import get_settings
 
 if TYPE_CHECKING:
+    from druks.agents.models import Agent
     from druks.apps import App
+    from druks.durable.models import Schedule
     from druks.teams.models import Team
 
 
@@ -85,6 +87,18 @@ class Account(Model, Uuid7Pk, ordering=("created_at", "id")):
         return bool(
             await self.session.scalar(self.teams.select().where(Team.apps.contains([app.name])))
         )
+
+    def can_edit(self, agent: "Agent") -> bool:
+        """Whether this account can change or delete the agent: its owner or an admin can."""
+        return self.is_admin or agent.owner_id == self.id
+
+    def can_talk_to(self, agent: "Agent") -> bool:
+        """Whether this account can talk to the agent: only its owner talks to a private one."""
+        return not agent.is_private or agent.owner_id == self.id
+
+    def can_stop(self, schedule: "Schedule") -> bool:
+        """Whether this account can stop the schedule: its owner or an admin can."""
+        return self.is_admin or schedule.account_id == self.id
 
     async def list_usable_apps(self) -> list["type[App]"]:
         """Every installed app that this account can use."""

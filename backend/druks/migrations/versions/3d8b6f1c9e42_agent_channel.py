@@ -1,4 +1,4 @@
-"""Give an agent a Slack channel.
+"""Give an agent a channel.
 
 Revision ID: 3d8b6f1c9e42
 Revises: 7a4c1e9b3d26
@@ -14,9 +14,9 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
-    op.add_column("agents", sa.Column("slack_channel_id", sa.String(), nullable=True))
-    op.create_unique_constraint("agents_slack_channel_id_key", "agents", ["slack_channel_id"])
+    op.add_column("agents", sa.Column("channel_id", sa.String(), nullable=True))
+    op.create_unique_constraint("agents_channel_id_key", "agents", ["channel_id"])
 
 
 def downgrade() -> None:
-    op.drop_column("agents", "slack_channel_id")
+    op.drop_column("agents", "channel_id")

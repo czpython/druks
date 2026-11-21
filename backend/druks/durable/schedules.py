@@ -5,9 +5,10 @@ from dbos import DBOS, StepOptions
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
+from druks.agents.constants import PRIVATE_AGENT_MESSAGE
 from druks.chat.constants import CONVERSATION_HEADER, SKIPPED_MESSAGE
 from druks.chat.models import Conversation
-from druks.chat.service import deliver, get_agent, report_outcome
+from druks.chat.service import deliver, get_agent_tools, report_outcome
 from druks.durable.constants import RUN_SCHEDULE_WORKFLOW, SCHEDULE_KEY_NAME
 from druks.durable.engine import step_session
 from druks.durable.exceptions import ScheduleSkipped
@@ -60,9 +61,15 @@ async def call_tool(schedule_id: str) -> dict[str, str] | None:
         if not schedule:
             return
         conversation = await session.get(Conversation, schedule.conversation_id)
-        _, _, tools = await get_agent(session, conversation)
+        # The agent can change owner or turn private after the schedule was made.
+        if conversation.agent and not conversation.account.can_talk_to(conversation.agent):
+            return {
+                "conversation_id": conversation.id,
+                "tool": schedule.tool,
+                "reason": PRIVATE_AGENT_MESSAGE,
+            }
         key = await get_druks_account_token(
-            session, schedule.account_id, tools, name=SCHEDULE_KEY_NAME
+            session, schedule.account_id, get_agent_tools(conversation), name=SCHEDULE_KEY_NAME
         )
         bearer = key.secrets["value"].removeprefix(BEARER_PREFIX)
         tool, arguments, conversation_id = (

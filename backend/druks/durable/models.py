@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 import sqlalchemy
-from croniter import croniter
+from croniter import CroniterBadDateError, croniter
 from dbos import DBOS, EnqueueOptions
 from sqlalchemy import (
     CheckConstraint,
@@ -53,9 +53,9 @@ from druks.durable.enums import (
     RunState,
     WorkflowEvent,
 )
-from druks.durable.exceptions import AgentCallNotFound, ArtifactContentMissing, ScheduleError
+from druks.durable.exceptions import AgentCallNotFound, ArtifactContentMissing
 from druks.events.models import Event
-from druks.exceptions import PermissionDenied
+from druks.exceptions import ValidationError
 from druks.harnesses.artifacts import normalize_token_usage
 from druks.models import Base
 from druks.notifications.constants import CLOSE_WORKFLOW
@@ -250,11 +250,9 @@ class Run(Base):
         *,
         kinds: Sequence[str],
         limit: int,
-        since: datetime | None = None,
     ) -> list["Run"]:
         """The runs that the agent's conversations started, newest first, each with its
-        agent calls. ``kinds`` keeps the runs of those workflows, and ``since`` the runs
-        that started at or after it."""
+        agent calls. ``kinds`` keeps the runs of those workflows."""
         # The chat models import the durable package, so this import cannot be at the top.
         from druks.chat.models import Conversation  # noqa: PLC0415
 
@@ -266,8 +264,6 @@ class Run(Base):
             .limit(limit)
             .options(selectinload(cls.agent_calls))
         )
-        if since:
-            stmt = stmt.where(cls.created_at >= since)
         return list(await session.scalars(stmt))
 
     @classmethod
@@ -851,6 +847,22 @@ class AgentCall(Base, Uuid7Pk):
         return await session.scalar(stmt) or 0.0
 
     @classmethod
+    async def get_cost_for_agent(
+        cls, session: AsyncSession, agent_id: str, *, kinds: Sequence[str], since: datetime
+    ) -> float:
+        """The cost of the agent's runs of ``kinds`` that started at or after ``since``."""
+        # The chat models import the durable package, so this import cannot be at the top.
+        from druks.chat.models import Conversation  # noqa: PLC0415
+
+        stmt = (
+            select(func.sum(cls.cost_usd))
+            .join(Run, Run.id == cls.run_id)
+            .join(Conversation, Conversation.id == Run.conversation_id)
+            .where(Conversation.agent_id == agent_id, Run.kind.in_(kinds), Run.created_at >= since)
+        )
+        return await session.scalar(stmt) or 0.0
+
+    @classmethod
     async def list_for_run(cls, session: AsyncSession, run_id: str) -> list["AgentCall"]:
         # Execution order — the same order Run.agent_calls loads.
         stmt = select(cls).where(cls.run_id == run_id).order_by(cls.created_at, cls.id)
@@ -994,8 +1006,13 @@ class Schedule(Base, Uuid7Pk):
         cron: str,
         tool_names: Collection[str],
     ) -> "Schedule":
-        schedule = cls(account_id=account_id, conversation_id=conversation_id)
-        schedule.change(tool=tool, arguments=arguments, cron=cron, tool_names=tool_names)
+        schedule = cls(
+            account_id=account_id,
+            conversation_id=conversation_id,
+            tool=cls._get_tool(tool, tool_names),
+            arguments=arguments,
+            cron=cls._get_cron(cron),
+        )
         session.add(schedule)
         await session.flush()
         return schedule
@@ -1003,16 +1020,33 @@ class Schedule(Base, Uuid7Pk):
     def change(
         self, *, tool: str, arguments: dict[str, Any], cron: str, tool_names: Collection[str]
     ) -> None:
-        """Save the call, after checking that ``tool_names`` holds the tool and that the
-        cron has five fields."""
+        """Set the tool, its arguments and the cron."""
+        self.tool = self._get_tool(tool, tool_names)
+        self.arguments = arguments
+        self.cron = self._get_cron(cron)
+
+    @staticmethod
+    def _get_tool(tool: str, tool_names: Collection[str]) -> str:
+        """The tool, when ``tool_names`` holds it."""
         if tool not in tool_names:
-            raise ScheduleError(f"No tool is named '{tool}'. Choose one of your tools.")
+            raise ValidationError(f"No tool is named '{tool}'. Choose one of your tools.")
+        return tool
+
+    @staticmethod
+    def _get_cron(cron: str) -> str:
+        """The cron, when it has five fields and a due time."""
         # DBOS reads a sixth field as seconds at the start, croniter as seconds at the end.
         if len(cron.split()) != 5 or not croniter.is_valid(cron):
-            raise ScheduleError(f"'{cron}' is not a cron. Write five fields, such as '0 9 * * 1'.")
-        self.tool = tool
-        self.arguments = arguments
-        self.cron = cron
+            raise ValidationError(
+                f"'{cron}' is not a cron. Write five fields, such as '0 9 * * 1'."
+            )
+        try:
+            croniter(cron).get_next(datetime)
+        except CroniterBadDateError as error:
+            raise ValidationError(
+                f"'{cron}' never comes due. Write a date that exists, such as '0 9 28 2 *'."
+            ) from error
+        return cron
 
     @classmethod
     async def list_for_account(cls, session: AsyncSession, account_id: str) -> list["Schedule"]:
@@ -1033,24 +1067,23 @@ class Schedule(Base, Uuid7Pk):
         )
 
     @classmethod
-    async def list_for_agent(cls, session: AsyncSession, agent_id: str) -> list["Schedule"]:
-        """The schedules set in the agent's conversations, newest first."""
+    async def list_for_agent(
+        cls, session: AsyncSession, agent_id: str, *, tools: Collection[str] | None = None
+    ) -> list["Schedule"]:
+        """The schedules set in the agent's conversations, newest first. ``tools`` keeps
+        the schedules that call one of those tools."""
         # The chat models import the durable package, so this import cannot be at the top.
         from druks.chat.models import Conversation  # noqa: PLC0415
 
-        return list(
-            await session.scalars(
-                select(cls)
-                .join(Conversation, Conversation.id == cls.conversation_id)
-                .where(Conversation.agent_id == agent_id)
-                .order_by(cls.created_at.desc(), cls.id.desc())
-            )
+        stmt = (
+            select(cls)
+            .join(Conversation, Conversation.id == cls.conversation_id)
+            .where(Conversation.agent_id == agent_id)
+            .order_by(cls.created_at.desc(), cls.id.desc())
         )
-
-    def check_stopper(self, account: Account) -> None:
-        """Only the owner or an admin stops a schedule."""
-        if account.id != self.account_id and not account.is_admin:
-            raise PermissionDenied("Only the schedule's owner or an admin can stop it.")
+        if tools is not None:
+            stmt = stmt.where(cls.tool.in_(tools))
+        return list(await session.scalars(stmt))
 
     @property
     def schedule_name(self) -> str:

@@ -65,7 +65,7 @@ Druks is a self-hosted runtime for durable agent apps. These apps can cross
 process boundaries, wait for people, and retain an inspectable history after a
 restart.
 
-Your app owns the domain: its workflows, agents, prompts, models, routes, and
+Your app owns the domain: its workflows, instructions, prompts, models, routes, and
 policy. Druks owns the operating substrate around it: durable execution,
 Postgres-backed state, queues, gates, sandboxes, harnesses, events, settings,
 and the shared dashboard.

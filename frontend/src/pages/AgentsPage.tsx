@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from 'wouter'
 
 import { api } from '../api/client'
-import type { Account, ConfiguredAgent, ConfiguredAgentInput } from '../api/types'
+import type { Account, Agent, AgentInput } from '../api/types'
 import { Button, Field, Select, Textarea, TextInput } from '../components/Control'
 import { Page } from '../components/Page'
 import { buildCatalog, knownProviders } from '../components/settings'
@@ -13,7 +13,7 @@ import '../agents.css'
 export function AgentsPage({ account }: { account: Account }) {
   const [, navigate] = useLocation()
   const queryClient = useQueryClient()
-  const agentsQuery = useQuery({ queryKey: ['configuredAgents'], queryFn: api.configuredAgents })
+  const agentsQuery = useQuery({ queryKey: ['agents'], queryFn: api.agents })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const skillsQuery = useQuery({ queryKey: ['skills'], queryFn: api.skillCollections })
   const harnessesQuery = useQuery({ queryKey: ['harnesses'], queryFn: api.harnesses })
@@ -32,7 +32,7 @@ export function AgentsPage({ account }: { account: Account }) {
     enabled: isAdmin,
     retry: false,
   })
-  const [draft, setDraft] = useState<ConfiguredAgentInput | null>(null)
+  const [draft, setDraft] = useState<AgentInput | null>(null)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,14 +73,14 @@ export function AgentsPage({ account }: { account: Account }) {
       model: '',
       isPrivate: true,
       ownerId: account.id,
-      slackChannelId: null,
+      channelId: null,
       pictureUrl: null,
     })
     setEditingAgentId(null)
     setError(null)
   }
 
-  function editAgent(agent: ConfiguredAgent) {
+  function editAgent(agent: Agent) {
     const { id, ...input } = agent
     setDraft(input)
     setEditingAgentId(id)
@@ -98,15 +98,15 @@ export function AgentsPage({ account }: { account: Account }) {
     )
   }
 
-  async function saveAgent(agent: ConfiguredAgentInput) {
+  async function saveAgent(agent: AgentInput) {
     setBusy(true)
     setError(null)
     try {
-      const { ownerId, slackChannelId, pictureUrl, ...input } = agent
+      const { ownerId, channelId, pictureUrl, ...input } = agent
       if (editingAgentId)
-        await api.updateConfiguredAgent(editingAgentId, { ...input, ownerId, slackChannelId, pictureUrl })
-      else await api.createConfiguredAgent(input)
-      await queryClient.invalidateQueries({ queryKey: ['configuredAgents'] })
+        await api.updateAgent(editingAgentId, { ...input, ownerId, channelId, pictureUrl })
+      else await api.createAgent(input)
+      await queryClient.invalidateQueries({ queryKey: ['agents'] })
       setDraft(null)
       setEditingAgentId(null)
     } catch (caught) {
@@ -116,13 +116,13 @@ export function AgentsPage({ account }: { account: Account }) {
     }
   }
 
-  async function deleteAgent(agent: ConfiguredAgent) {
+  async function deleteAgent(agent: Agent) {
     if (window.confirm(`Delete agent ${agent.name}?`)) {
       setBusy(true)
       setError(null)
       try {
-        await api.deleteConfiguredAgent(agent.id)
-        await queryClient.invalidateQueries({ queryKey: ['configuredAgents'] })
+        await api.deleteAgent(agent.id)
+        await queryClient.invalidateQueries({ queryKey: ['agents'] })
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught))
       } finally {
@@ -133,6 +133,9 @@ export function AgentsPage({ account }: { account: Account }) {
 
   // A private agent runs on its owner's subscription. A public agent can run on the install's API key.
   const billing = draft?.isPrivate ? 'subscription' : 'api_key'
+  const harness = harnesses.find((entry) => entry.name === draft?.harness)
+  // The form sees only the viewer's subscriptions and the installation's keys. A public agent without a key runs on the unattended account's subscription.
+  const canCheckCredential = draft?.isPrivate ? draft.ownerId === account.id : !harness?.billingOptions.includes('subscription')
   // A saved skill that Settings no longer enables stays listed, so the person can turn it off and save.
   const skillChoices = [
     ...skills,
@@ -262,12 +265,14 @@ export function AgentsPage({ account }: { account: Account }) {
           </Field>
           <Field
             label="Model"
-            help="A private agent runs on its owner's subscription. A public agent runs on the installation's API key. Connect them in Settings → Providers."
+            help="A private agent runs on its owner's subscription. A public agent runs on the installation's API key or, without one, on the unattended account's subscription. Connect them in Settings → Providers."
           >
             <ModelChooser
               value={draft.model || null}
               displayValue={draft.model || 'Choose a model'}
-              choices={catalog.modelsOf(draft.harness, billing)}
+              choices={catalog
+                .modelsOf(draft.harness, billing)
+                .map((choice) => (canCheckCredential ? choice : { ...choice, enabled: true, unavailableReason: undefined }))}
               onPick={(model) => model && setDraft({ ...draft, model })}
               disabled={busy}
               label="Model"
@@ -309,14 +314,14 @@ export function AgentsPage({ account }: { account: Account }) {
             >
               <Select
                 aria-label="Slack channel"
-                value={draft.slackChannelId ?? ''}
-                onChange={(event) => setDraft({ ...draft, slackChannelId: event.target.value || null })}
+                value={draft.channelId ?? ''}
+                onChange={(event) => setDraft({ ...draft, channelId: event.target.value || null })}
                 disabled={busy}
               >
                 <option value="">No channel</option>
-                {draft.slackChannelId &&
-                  !channels.some((channel) => channel.id === draft.slackChannelId) && (
-                    <option value={draft.slackChannelId}>{draft.slackChannelId}</option>
+                {draft.channelId &&
+                  !channels.some((channel) => channel.id === draft.channelId) && (
+                    <option value={draft.channelId}>{draft.channelId}</option>
                   )}
                 {channels.map((channel) => (
                   <option key={channel.id} value={channel.id}>
@@ -349,7 +354,7 @@ export function AgentsPage({ account }: { account: Account }) {
 
       {agentsQuery.isSuccess && agents.length === 0 && <p>There are no agents yet.</p>}
       {agents.length > 0 && (
-        <table className="connections-table" aria-label="Agents">
+        <table className="connections-table agents-table" aria-label="Agents">
           <thead>
             <tr>
               <th scope="col">Agent</th>

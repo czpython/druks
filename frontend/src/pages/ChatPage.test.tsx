@@ -6,7 +6,7 @@ import { Route, Router } from 'wouter'
 
 import { chatApi } from '../chat/api'
 import { api } from '../api/client'
-import type { Account, ConfiguredAgent } from '../api/types'
+import type { Account, Agent } from '../api/types'
 import type { Conversation, ConversationAction, Message } from '../chat/state'
 import { UserPreferencesProvider } from '../lib/preferences'
 import { ChatPage } from './ChatPage'
@@ -31,9 +31,9 @@ const conversation: Conversation = {
   isPinned: false, lastMessageAt: message.createdAt, agentId: null, agentName: null,
 }
 const admin: Account = { id: 'admin', username: 'admin@example.com', isDefault: true, role: 'admin' }
-const reviewer: ConfiguredAgent = {
+const reviewer: Agent = {
   id: 'agent-1', name: 'Reviewer', description: 'Reviews pull requests', instructions: 'Be brief.',
-  skills: [], harness: 'claude', model: 'claude-opus', isPrivate: true, ownerId: 'admin', slackChannelId: null, pictureUrl: null,
+  skills: [], harness: 'claude', model: 'claude-opus', isPrivate: true, ownerId: 'admin', channelId: null, pictureUrl: null,
 }
 
 function mount(path = `/chat/${conversation.id}`, timezone?: string) {
@@ -69,7 +69,7 @@ beforeEach(() => {
   vi.mocked(chatApi.stop).mockResolvedValue(undefined)
   vi.mocked(chatApi.setPinned).mockImplementation(async (_id, isPinned) => ({ ...conversation, isPinned }))
   vi.spyOn(api, 'listApps').mockResolvedValue([])
-  vi.spyOn(api, 'configuredAgents').mockResolvedValue([])
+  vi.spyOn(api, 'agents').mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -274,7 +274,7 @@ describe('Chat page', () => {
     mount('/chat/new')
     expect(chatApi.create).not.toHaveBeenCalled()
     expect(screen.queryByText('No messages yet')).toBeNull()
-    await waitFor(() => expect(api.configuredAgents).toHaveResolved())
+    await waitFor(() => expect(api.agents).toHaveResolved())
     await screen.findByText('0 installed apps')
     expect(screen.queryByRole('combobox', { name: 'Talk to' })).toBeNull()
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), { target: { value: message.body } })
@@ -288,7 +288,7 @@ describe('Chat page', () => {
 
   it('starts a conversation with an agent the person can talk to', async () => {
     vi.mocked(chatApi.list).mockResolvedValue([])
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([
+    vi.spyOn(api, 'agents').mockResolvedValue([
       reviewer,
       { ...reviewer, id: 'agent-2', name: 'Writer', isPrivate: false, ownerId: 'member' },
       { ...reviewer, id: 'agent-3', name: 'Diary', ownerId: 'member' },

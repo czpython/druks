@@ -18,6 +18,7 @@ from conftest import (
 from druks.accounts.context import current_conversation_id
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.agents.models import Agent
 from druks.api.server import mcp_app
 from druks.browser.constants import BROWSER_TOOLS
 from druks.chat.channels.whatsapp.constants import WAHA_AUDIENCE
@@ -946,6 +947,38 @@ async def test_a_schedule_whose_tool_refuses_the_call_says_why(app, account, dru
     assert skipped["conversation_id"] == conversation.id
     assert skipped["tool"] == "cancel_run"
     assert "no-such-run" in skipped["reason"]
+
+
+async def test_a_schedule_whose_agent_no_longer_answers_its_owner_says_why(account, druks_db):
+    owner = await Account.get_or_create(druks_db, "ana@example.com")
+    agent = await Agent.create(
+        druks_db,
+        owner=owner,
+        name="Reviewer",
+        description="Reviews pull requests.",
+        instructions="Review the pull request.",
+        skills=[],
+        harness="claude",
+        model="anthropic/claude-opus-4-7",
+        is_private=True,
+    )
+    conversation = await Conversation.create(
+        druks_db, account_id=account.id, body="Nudge me", agent_id=agent.id
+    )
+    schedule = await Schedule.create(
+        druks_db,
+        account_id=account.id,
+        conversation_id=conversation.id,
+        tool="chat_create_reminder",
+        arguments={"body": "Stand up", "delay_seconds": 60},
+        cron="0 9 * * *",
+        tool_names=["chat_create_reminder"],
+    )
+    await druks_db.commit()
+
+    skipped = await call_tool(schedule.id)
+
+    assert skipped["reason"] == "Only the agent's owner can talk to a private agent."
 
 
 async def test_a_schedule_whose_call_cannot_reach_druks_says_why(account, druks_db, monkeypatch):

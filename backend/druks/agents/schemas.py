@@ -19,7 +19,7 @@ class AgentRequest(BaseModel):
 
 class AgentUpdateRequest(AgentRequest):
     owner_id: str = Field(alias="ownerId")
-    slack_channel_id: NonBlank | None = Field(alias="slackChannelId")
+    channel_id: NonBlank | None = Field(alias="channelId")
     picture_url: NonBlank | None = Field(alias="pictureUrl")
 
 
@@ -35,5 +35,9 @@ class AgentResponse(Schema):
     model: str
     owner_id: str
     is_private: bool
-    slack_channel_id: str | None
+    channel_id: str | None
     picture_url: str | None
+
+
+class AgentCostResponse(Schema):
+    cost_usd: float

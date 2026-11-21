@@ -38,7 +38,7 @@ import { SlackPane } from './SlackPane'
 import { WhatsAppNumbersPane } from './WhatsAppNumbersPane'
 import {
   AgentAccessPane,
-  AgentsPane,
+  InstructionsPane,
   AppPane,
   ConnectionsPane,
   PreferencesPane,
@@ -140,7 +140,7 @@ export function SettingsPages({
     enabled: Boolean(appName && isAdmin),
   })
   const harnessesQuery = useQuery({ queryKey: ['harnesses'], queryFn: api.harnesses })
-  const agentsQuery = useQuery({ queryKey: ['instructions'], queryFn: api.instructions })
+  const instructionsQuery = useQuery({ queryKey: ['instructions'], queryFn: api.instructions })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const providersQuery = useQuery({ queryKey: ['providers'], queryFn: api.providers })
   const subscriptionsQuery = useQuery({
@@ -157,7 +157,7 @@ export function SettingsPages({
     subscriptionsQuery,
     keysQuery,
     catalogsQuery,
-    ...(!appName ? [agentsQuery, accountsQuery] : []),
+    ...(!appName ? [instructionsQuery, accountsQuery] : []),
   ]
   const executionReady = executionQueries.every((query) => query.isSuccess)
   const executionFailed = executionQueries.some((query) => query.isError)
@@ -229,7 +229,7 @@ export function SettingsPages({
   ]
   const dirty = dirtyPages.includes(section)
   const app = appName ? apps.find((entry) => entry.name === appName) : undefined
-  const hasAgents = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
+  const hasInstructions = Boolean(app?.agents.some((agent) => agent.name !== app.bot))
   // Only a public Bot takes calls.
   const channels = (appsQuery.data?.channels ?? []).filter(
     (channel) => channel !== 'call' || app?.botAccess === 'public',
@@ -240,7 +240,7 @@ export function SettingsPages({
     !appName ||
     (isAdmin &&
       (location === `/apps/${appName}/settings` ||
-        (hasAgents && location === `/apps/${appName}/settings/instructions`) ||
+        (hasInstructions && location === `/apps/${appName}/settings/instructions`) ||
         Boolean(app?.bot && location === `/apps/${appName}/settings/bots`) ||
         (hasChannels && location === `/apps/${appName}/settings/channels`)))
   const hasOptions = Boolean(
@@ -248,7 +248,7 @@ export function SettingsPages({
   )
   let paneSection = appTab
   if (!hasOptions && appTab === 'options') {
-    if (hasAgents) paneSection = 'instructions'
+    if (hasInstructions) paneSection = 'instructions'
     else if (app?.bot) paneSection = 'bots'
   }
   const executionPage = isAdmin && (section === 'instructions' || Boolean(appName && ['instructions', 'bots'].includes(paneSection)))
@@ -481,7 +481,7 @@ export function SettingsPages({
     }),
     ...entry.agents.flatMap((agent) => [SETTINGS_FIELDS.harness, SETTINGS_FIELDS.model, SETTINGS_FIELDS.billing, SETTINGS_FIELDS.effort, SETTINGS_FIELDS.timeout].map((field) => ({
       label: `${field.label} · ${agent.label}`, owner: appLabel(entry.name), kind: 'Field',
-      terms: `agent override inheritance ${agent.description}`,
+      terms: `instruction bot override inheritance ${agent.description}`,
       path: `/apps/${entry.name}/settings/${agent.name === entry.bot ? 'bots' : 'instructions'}?field=${encodeURIComponent(`agent.${agent.name}.${field.field}`)}`,
     }))),
   ]) : []).filter((entry) => `${entry.label} ${entry.owner} ${entry.terms}`.toLowerCase().includes(search.trim().toLowerCase()))
@@ -615,7 +615,7 @@ export function SettingsPages({
           {appName && app && validAppPage && (
             <>
               <p className="app-settings-description">{app.description}</p>
-              {(app.bot || (hasOptions && hasAgents)) && (
+              {(app.bot || (hasOptions && hasInstructions)) && (
                 <nav className="settings-tabs" aria-label="App settings sections">
                   {hasOptions && (
                     <Link
@@ -625,7 +625,7 @@ export function SettingsPages({
                       Options
                     </Link>
                   )}
-                  {hasAgents && (
+                  {hasInstructions && (
                     <Link
                       href={`/apps/${app.name}/settings/instructions`}
                       aria-current={paneSection === 'instructions' ? 'page' : undefined}
@@ -689,7 +689,7 @@ export function SettingsPages({
           {executionPage && !executionReady &&
             (executionFailed ? (
               <p role="alert" className="settings-error">
-                Could not load agent configuration.{' '}
+                Could not load execution settings.{' '}
                 <button
                   onClick={() => {
                     for (const query of executionQueries) if (query.isError) void query.refetch()
@@ -699,7 +699,7 @@ export function SettingsPages({
                 </button>
               </p>
             ) : (
-              <p role="status">Loading agent configuration…</p>
+              <p role="status">Loading execution settings…</p>
             ))}
           {(settingsQuery.isError || appsQuery.isError) &&
             !executionPage &&
@@ -739,11 +739,11 @@ export function SettingsPages({
                 />
               )}
               {isAdmin && page === 'instructions' && executionReady && effectiveDefaults && (
-                <AgentsPane
+                <InstructionsPane
                   defaults={effectiveDefaults}
                   onDefaults={setDefaults}
                   accounts={accountsQuery.data ?? []}
-                  resolved={agentsQuery.data ?? { apps: [] }}
+                  resolved={instructionsQuery.data ?? { apps: [] }}
                   harnessByName={harnessByName}
                   harnessColor={harnessColor}
                   catalog={catalog}

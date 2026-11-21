@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '../api/client'
-import type { Account, ConfiguredAgent } from '../api/types'
+import type { Account, Agent } from '../api/types'
 import { AgentsPage } from './AgentsPage'
 
 const admin: Account = { id: 'admin', username: 'admin@example.com', isDefault: true, role: 'admin' }
@@ -13,7 +13,7 @@ const member: Account = {
   isDefault: false,
   role: 'member',
 }
-const reviewer: ConfiguredAgent = {
+const reviewer: Agent = {
   id: 'agent-1',
   name: 'Reviewer',
   description: 'Reviews pull requests',
@@ -23,7 +23,7 @@ const reviewer: ConfiguredAgent = {
   model: 'claude-opus',
   isPrivate: false,
   ownerId: 'admin',
-  slackChannelId: null,
+  channelId: null,
   pictureUrl: null,
 }
 
@@ -89,10 +89,10 @@ afterEach(() => {
 
 describe('AgentsPage', () => {
   it('creates an agent with an enabled skill and lists it', async () => {
-    let agents: ConfiguredAgent[] = []
-    vi.spyOn(api, 'configuredAgents').mockImplementation(async () => agents)
-    const create = vi.spyOn(api, 'createConfiguredAgent').mockImplementation(async (body) => {
-      const agent = { ...body, id: 'agent-2', ownerId: 'member', slackChannelId: null, pictureUrl: null }
+    let agents: Agent[] = []
+    vi.spyOn(api, 'agents').mockImplementation(async () => agents)
+    const create = vi.spyOn(api, 'createAgent').mockImplementation(async (body) => {
+      const agent = { ...body, id: 'agent-2', ownerId: 'member', channelId: null, pictureUrl: null }
       agents = [agent]
       return agent
     })
@@ -125,9 +125,27 @@ describe('AgentsPage', () => {
     expect(within(row).getByText('Private')).toBeTruthy()
   })
 
+  it('creates a public agent without an installation key', async () => {
+    vi.spyOn(api, 'agents').mockResolvedValue([])
+    const create = vi.spyOn(api, 'createAgent').mockResolvedValue(reviewer)
+
+    renderPage(member)
+    await screen.findByText('There are no agents yet.')
+    fireEvent.click(screen.getByRole('button', { name: 'Add agent' }))
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Helper' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Private' }))
+    fireEvent.click(screen.getByRole('button', { name: /^Model:/ }))
+    fireEvent.click(screen.getByRole('option', { name: /Claude Opus/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create agent' }))
+
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ model: 'claude-opus', isPrivate: false })),
+    )
+  })
+
   it('lets an admin give an agent to another owner', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([reviewer])
-    const update = vi.spyOn(api, 'updateConfiguredAgent').mockResolvedValue({
+    vi.spyOn(api, 'agents').mockResolvedValue([reviewer])
+    const update = vi.spyOn(api, 'updateAgent').mockResolvedValue({
       ...reviewer,
       ownerId: 'member',
     })
@@ -147,15 +165,15 @@ describe('AgentsPage', () => {
         model: 'claude-opus',
         isPrivate: false,
         ownerId: 'member',
-        slackChannelId: null,
+        channelId: null,
         pictureUrl: null,
       }),
     )
   })
 
   it('lets an admin give an agent a Slack channel', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([reviewer])
-    const update = vi.spyOn(api, 'updateConfiguredAgent').mockResolvedValue(reviewer)
+    vi.spyOn(api, 'agents').mockResolvedValue([reviewer])
+    const update = vi.spyOn(api, 'updateAgent').mockResolvedValue(reviewer)
 
     renderPage(admin)
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
@@ -164,13 +182,13 @@ describe('AgentsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save agent' }))
 
     await waitFor(() =>
-      expect(update).toHaveBeenCalledWith('agent-1', expect.objectContaining({ slackChannelId: 'C1' })),
+      expect(update).toHaveBeenCalledWith('agent-1', expect.objectContaining({ channelId: 'C1' })),
     )
   })
 
   it('lets the owner give their agent a picture', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([{ ...reviewer, ownerId: 'member' }])
-    const update = vi.spyOn(api, 'updateConfiguredAgent').mockResolvedValue(reviewer)
+    vi.spyOn(api, 'agents').mockResolvedValue([{ ...reviewer, ownerId: 'member' }])
+    const update = vi.spyOn(api, 'updateAgent').mockResolvedValue(reviewer)
 
     renderPage(member)
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
@@ -188,7 +206,7 @@ describe('AgentsPage', () => {
   })
 
   it('shows a member the owner of their agent without an owner picker', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([{ ...reviewer, ownerId: 'member' }])
+    vi.spyOn(api, 'agents').mockResolvedValue([{ ...reviewer, ownerId: 'member' }])
 
     renderPage(member)
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
@@ -200,8 +218,8 @@ describe('AgentsPage', () => {
   })
 
   it('lets the owner turn off a saved skill that is no longer enabled', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([{ ...reviewer, skills: ['deploy'] }])
-    const update = vi.spyOn(api, 'updateConfiguredAgent').mockResolvedValue(reviewer)
+    vi.spyOn(api, 'agents').mockResolvedValue([{ ...reviewer, skills: ['deploy'] }])
+    const update = vi.spyOn(api, 'updateAgent').mockResolvedValue(reviewer)
 
     renderPage(admin)
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
@@ -214,7 +232,7 @@ describe('AgentsPage', () => {
   })
 
   it('clears the model when the harness changes', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([reviewer])
+    vi.spyOn(api, 'agents').mockResolvedValue([reviewer])
 
     renderPage(admin)
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
@@ -224,7 +242,7 @@ describe('AgentsPage', () => {
   })
 
   it('points only an admin to Settings → Skills', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([])
+    vi.spyOn(api, 'agents').mockResolvedValue([])
 
     const openForm = async () => {
       const add = (await screen.findByRole('button', { name: 'Add agent' })) as HTMLButtonElement
@@ -244,7 +262,7 @@ describe('AgentsPage', () => {
   })
 
   it('hides edit and delete on an agent another person owns', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([reviewer])
+    vi.spyOn(api, 'agents').mockResolvedValue([reviewer])
 
     renderPage(member)
 
@@ -254,8 +272,8 @@ describe('AgentsPage', () => {
   })
 
   it('deletes an agent only after the person confirms', async () => {
-    vi.spyOn(api, 'configuredAgents').mockResolvedValue([reviewer])
-    const remove = vi.spyOn(api, 'deleteConfiguredAgent').mockResolvedValue()
+    vi.spyOn(api, 'agents').mockResolvedValue([reviewer])
+    const remove = vi.spyOn(api, 'deleteAgent').mockResolvedValue()
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
 
     renderPage(admin)

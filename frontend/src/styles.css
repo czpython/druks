@@ -710,7 +710,7 @@ textarea.set-textarea { background-image: none; height: auto; min-height: 96px; 
 
 .set-table { border: 1px solid var(--druks-color-border-default); border-radius: 7px; overflow: hidden; }
 .set-thead, .set-trow { display: grid; align-items: center; grid-template-columns: minmax(132px, 1.4fr) 96px minmax(120px, 1.2fr) 104px 86px 86px; gap: 8px; padding: 0 12px; }
-.agents-table .set-thead, .agents-table .set-trow { grid-template-columns: minmax(132px, 1.4fr) 96px minmax(120px, 1.2fr) 104px 72px 72px; }
+.instructions-table .set-thead, .instructions-table .set-trow { grid-template-columns: minmax(132px, 1.4fr) 96px minmax(120px, 1.2fr) 104px 72px 72px; }
 .agents-app { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px; background: var(--druks-color-surface); border-bottom: 1px solid var(--druks-color-border-subtle); font-family: var(--font-mono); font-size: 11px; color: var(--druks-color-text-secondary); }
 .agents-app-link { margin-left: auto; background: none; border: none; color: var(--druks-color-text-tertiary); font-family: var(--font-mono); font-size: 12px; cursor: pointer; }
 .agents-app-link:hover { color: var(--druks-color-text-primary); }

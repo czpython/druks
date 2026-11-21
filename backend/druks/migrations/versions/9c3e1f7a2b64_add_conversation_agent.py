@@ -23,8 +23,15 @@ def upgrade() -> None:
         ["id"],
         ondelete="CASCADE",
     )
+    op.create_index(
+        "chat_conversations_agent_idx",
+        "chat_conversations",
+        ["agent_id"],
+        postgresql_where=sa.text("agent_id IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("chat_conversations_agent_idx", table_name="chat_conversations")
     op.drop_constraint("chat_conversations_agent_id_fkey", "chat_conversations", type_="foreignkey")
     op.drop_column("chat_conversations", "agent_id")

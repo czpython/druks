@@ -554,10 +554,6 @@ artifact, and result conversion. The instruction's declared contract stays uncha
 `contract` is not prompt context. Build dynamic types with Pydantic `create_model`
 and use `to_result()` to return a stable type for durable storage.
 
-Pass `agent=` with a saved agent to run the call as that agent. The call then
-uses the agent's model, on the agent's billing, and only the skills picked on
-the agent. `agent` is not prompt context either.
-
 If an agent produces a file, use [`File` and `FileField`](files.md).
 The contract declares the file, Druks transports and serves it, and the app can
 persist its stable reference on an app row.
@@ -800,7 +796,7 @@ on the Bot declares its default. The Bot runs on Claude, like Chat.
 
 ## Customize the workspace
 
-Every agent uses a `Workspace` around a Drukbox sandbox. `Workflow.workspace_class`
+Every agent call uses a `Workspace` around a Drukbox sandbox. `Workflow.workspace_class`
 names the kind. A workflow about a GitHub repository declares `RepoWorkspace`
 and nothing else:
 
@@ -956,7 +952,7 @@ sandbox. The harness configuration names the variable, and the sandbox never
 holds the token. A workspace server owns its name, so a same-named registry
 server is not delivered. `Workspace.get_all_mcp_servers(subject, account_id)`
 returns the harness shapes and the secret refs for every MCP server of a
-sandbox: the workspace's servers and the enabled registry servers. An agent
+sandbox: the workspace's servers and the enabled registry servers. An instruction
 declared with `include_mcp=False` gets none of them.
 
 A workflow runs one command in a VM of its workspace with `exec`. The VM comes

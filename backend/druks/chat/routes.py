@@ -12,10 +12,12 @@ from slack_sdk.errors import SlackApiError
 from druks.accounts.context import current_conversation_id
 from druks.accounts.dependencies import current_account, current_session_account
 from druks.accounts.models import Account
+from druks.agents.constants import PRIVATE_AGENT_MESSAGE
+from druks.agents.models import Agent
 from druks.api.dependencies import SessionDep
-from druks.configured_agents.models import ConfiguredAgent
 from druks.durable.reads import list_active_runs_for_conversation
 from druks.durable.schemas import ActiveRunResponse
+from druks.exceptions import PermissionDenied
 from druks.redis import get_client
 from druks.sandbox.constants import SANDBOX_HOST_LEASE_SECONDS
 from druks.sandbox.exceptions import SandboxUploadError
@@ -74,8 +76,9 @@ async def create_conversation(
     if not body.strip():
         raise HTTPException(422, "Write a message.")
     if agent_id:
-        agent = await ConfiguredAgent.get_for_account(session, agent_id, account)
-        agent.check_talker(account)
+        agent = await Agent.get_for_account(session, agent_id, account)
+        if not account.can_talk_to(agent):
+            raise PermissionDenied(PRIVATE_AGENT_MESSAGE)
     conversation = await Conversation.create(
         session, account_id=account.id, body=body, agent_id=agent_id
     )

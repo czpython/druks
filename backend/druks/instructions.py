@@ -47,8 +47,8 @@ from druks.usage.models import UsageScrape
 from druks.workflows import _in_step, _post_to_chat, current_workflow
 
 if TYPE_CHECKING:
+    from druks.agents.models import Agent
     from druks.browser.sessions import BrowserSession
-    from druks.configured_agents.models import ConfiguredAgent
     from druks.harnesses.base import Harness
     from druks.sandbox.datastructures import AgentResult
     from druks.sandbox.host import Host
@@ -198,7 +198,7 @@ class Instruction:
         self,
         *,
         contract: type[InstructionOutput] | None = None,
-        agent: "ConfiguredAgent | None" = None,
+        agent: "Agent | None" = None,
         **context: object,
     ) -> Any:
         """Run the instruction — ``await SoftwareFactory.implement(...)`` — as a durable step in the
@@ -312,7 +312,7 @@ class Instruction:
                 workflow.journal.add(result)
                 return result
 
-    async def _wait_out_quota(self, workflow, quota: dict, agent: "ConfiguredAgent | None") -> bool:
+    async def _wait_out_quota(self, workflow, quota: dict, agent: "Agent | None") -> bool:
         """Sleep until the quota resets. Return False early when the agent switches to another
         account, model, or billing."""
         wait_seconds = quota["wait_seconds"]
@@ -334,7 +334,7 @@ class Instruction:
         return False
 
     async def _get_config(
-        self, session: AsyncSession, account_id: str | None, agent: "ConfiguredAgent | None"
+        self, session: AsyncSession, account_id: str | None, agent: "Agent | None"
     ) -> AgentConfig:
         """How one call runs: as the saved agent when it has one, else by this
         instruction's settings for the account."""
@@ -358,7 +358,7 @@ class Instruction:
         *,
         workflow_id: str,
         contract: type[InstructionOutput] | None = None,
-        agent: "ConfiguredAgent | None" = None,
+        agent: "Agent | None" = None,
         **context: Any,
     ) -> Any:
         """The raw execution: read what the call needs, provision or attach a host,
@@ -451,8 +451,7 @@ class Instruction:
                 )
                 if agent:
                     # An agent with no skills gets none, not the whole catalog.
-                    enabled = {skill.name for skill in await Skill.list_enabled(session)}
-                    skills = [name for name in agent.skills if name in enabled]
+                    skills = await agent.list_enabled_skills(session)
                 else:
                     requested = await workspace_class.get_skills(subject)
                     delivered = await Skill.list_delivered(session, requested)
@@ -642,7 +641,7 @@ class Instruction:
 
 
 async def _quota_retry_wait(
-    instruction: Instruction, account_id: str | None, agent: "ConfiguredAgent | None"
+    instruction: Instruction, account_id: str | None, agent: "Agent | None"
 ) -> dict:
     # Runs as its own step: replay reuses the recorded wait instead of
     # re-reading the scrape.
@@ -669,7 +668,7 @@ async def _quota_retry_wait(
 
 
 async def _quota_wait_remaining(
-    instruction: Instruction, account_id: str | None, agent: "ConfiguredAgent | None", quota: dict
+    instruction: Instruction, account_id: str | None, agent: "Agent | None", quota: dict
 ) -> float:
     async with step_session() as session:
         config = await instruction._get_config(session, account_id, agent)

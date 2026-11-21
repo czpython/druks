@@ -14,6 +14,7 @@ from starlette.routing import Route
 from druks.accounts.dependencies import current_account, resolve_single_operator
 from druks.accounts.exceptions import AuthConfigurationError
 from druks.accounts.routes import router as auth_router
+from druks.agents.routes import router as agents_router
 from druks.api.artifacts import router as artifacts_router
 from druks.api.dashboard import router as dashboard_router
 from druks.api.dependencies import commit_before_response
@@ -29,7 +30,6 @@ from druks.browser.routes import router as browser_sessions_router
 from druks.chat.channels.calls.exceptions import CallsLinkError
 from druks.chat.channels.whatsapp.exceptions import WahaError, WhatsAppLinkError
 from druks.chat.sockets import router as chat_sockets_router
-from druks.configured_agents.routes import router as configured_agents_router
 from druks.core.apis.exceptions import TwilioError
 from druks.core.templates import render_page
 from druks.database import (
@@ -329,7 +329,7 @@ app.include_router(notifications_external_router)
 app.include_router(webhooks_router)
 app.include_router(auth_router)
 app.include_router(teams_router)
-app.include_router(configured_agents_router)
+app.include_router(agents_router)
 app.include_router(providers_router)
 app.include_router(secrets_router)
 app.include_router(browser_sessions_router)

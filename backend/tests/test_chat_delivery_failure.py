@@ -6,13 +6,13 @@ import pytest
 from conftest import connect_anthropic_subscription
 from druks.accounts.enums import AccountKind
 from druks.accounts.models import Account
+from druks.agents.models import Agent
 from druks.apps.registry import channels, services
 from druks.chat import service
 from druks.chat.constants import DELIVERY_FAILED_MESSAGE
 from druks.chat.enums import MessageRole, MessageState
 from druks.chat.exceptions import ChatBridgeError
 from druks.chat.models import Conversation, Message
-from druks.configured_agents.models import ConfiguredAgent
 from druks.database import session_scope
 from druks.files.datastructures import File
 from druks.files.models import FileRecord
@@ -207,7 +207,7 @@ async def test_a_turn_fails_without_a_retry_once_a_public_agent_turns_private(
 ):
     owner = await Account.get_or_create(druks_db, "owner@example.com")
     other = await Account.get_or_create(druks_db, "other@example.com")
-    agent = await ConfiguredAgent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    agent = await Agent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
     conversation = await Conversation.create(
         druks_db, account_id=other.id, body="Review this", agent_id=agent.id
     )
@@ -215,7 +215,7 @@ async def test_a_turn_fails_without_a_retry_once_a_public_agent_turns_private(
         druks_db,
         editor=owner,
         owner_id=owner.id,
-        slack_channel_id=None,
+        channel_id=None,
         picture_url=None,
         **{**AGENT, "is_private": True},
     )
@@ -250,7 +250,7 @@ async def test_a_public_agent_turn_with_no_api_key_and_no_unattended_subscriptio
     asker = await Account.get(
         druks_db, id=(await connect_anthropic_subscription("ana@example.com")).account_id
     )
-    agent = await ConfiguredAgent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
+    agent = await Agent.create(druks_db, owner=owner, **{**AGENT, "is_private": False})
     conversation = await Conversation.create(
         druks_db, account_id=asker.id, body="Review this", agent_id=agent.id
     )
@@ -284,7 +284,7 @@ async def test_a_public_agent_on_a_harness_with_no_subscription_asks_only_for_th
 ):
     subscription = await connect_anthropic_subscription("owner@example.com")
     owner = await Account.get(druks_db, id=subscription.account_id)
-    agent = await ConfiguredAgent.create(
+    agent = await Agent.create(
         druks_db, owner=owner, **{**AGENT, "harness": "opencode", "is_private": False}
     )
     conversation = await Conversation.create(

@@ -2,7 +2,7 @@ import type {
   Account,
   AgentSchedule,
   AccountRole,
-  AgentsResponse,
+  InstructionsResponse,
   AgentCallFiles,
   ArtifactContent,
   Automation,
@@ -11,8 +11,8 @@ import type {
   CallLine,
   ConnectChallenge,
   Connection,
-  ConfiguredAgent,
-  ConfiguredAgentInput,
+  Agent,
+  AgentInput,
   App,
   FeedResponse,
   FeedDestinations,
@@ -325,7 +325,7 @@ export const api = {
   updatePersonalSettings: (body: UpdatePersonalSettingsRequest) =>
     patchJSON<PersonalSettings>('/api/settings/personal', body),
   harnesses: () => getJSON<Harness[]>('/api/settings/harnesses'),
-  instructions: () => getJSON<AgentsResponse>('/api/instructions'),
+  instructions: () => getJSON<InstructionsResponse>('/api/instructions'),
   accounts: () => getJSON<Account[]>('/api/auth/accounts'),
   setAccountRole: (accountId: string, role: AccountRole) =>
     patchJSON<Account>(`/api/auth/accounts/${encodeURIComponent(accountId)}`, { role }),
@@ -334,21 +334,23 @@ export const api = {
   updateTeam: (teamId: string, body: TeamInput) =>
     postJSON<Team>(`/api/teams/${encodeURIComponent(teamId)}`, body, 'PUT'),
   deleteTeam: (teamId: string) => deleteRequest(`/api/teams/${encodeURIComponent(teamId)}`),
-  configuredAgents: () => getJSON<ConfiguredAgent[]>('/api/configured-agents'),
-  createConfiguredAgent: (body: Omit<ConfiguredAgentInput, 'ownerId' | 'slackChannelId' | 'pictureUrl'>) =>
-    postJSON<ConfiguredAgent>('/api/configured-agents', body),
-  updateConfiguredAgent: (agentId: string, body: ConfiguredAgentInput) =>
-    postJSON<ConfiguredAgent>(`/api/configured-agents/${encodeURIComponent(agentId)}`, body, 'PUT'),
-  deleteConfiguredAgent: (agentId: string) =>
-    deleteRequest(`/api/configured-agents/${encodeURIComponent(agentId)}`),
-  configuredAgent: (agentId: string) =>
-    getJSON<ConfiguredAgent>(`/api/configured-agents/${encodeURIComponent(agentId)}`),
-  configuredAgentRuns: (agentId: string, query: Record<string, string> = {}) =>
-    getJSON<RunSummary[]>(
-      `/api/configured-agents/${encodeURIComponent(agentId)}/runs?${new URLSearchParams(query)}`,
+  agents: () => getJSON<Agent[]>('/api/agents'),
+  createAgent: (body: Omit<AgentInput, 'ownerId' | 'channelId' | 'pictureUrl'>) =>
+    postJSON<Agent>('/api/agents', body),
+  updateAgent: (agentId: string, body: AgentInput) =>
+    postJSON<Agent>(`/api/agents/${encodeURIComponent(agentId)}`, body, 'PUT'),
+  deleteAgent: (agentId: string) =>
+    deleteRequest(`/api/agents/${encodeURIComponent(agentId)}`),
+  agent: (agentId: string) =>
+    getJSON<Agent>(`/api/agents/${encodeURIComponent(agentId)}`),
+  agentRuns: (agentId: string) =>
+    getJSON<RunSummary[]>(`/api/agents/${encodeURIComponent(agentId)}/runs`),
+  agentCost: (agentId: string, since: string) =>
+    getJSON<{ costUsd: number }>(
+      `/api/agents/${encodeURIComponent(agentId)}/cost?${new URLSearchParams({ since })}`,
     ),
-  configuredAgentSchedules: (agentId: string) =>
-    getJSON<AgentSchedule[]>(`/api/configured-agents/${encodeURIComponent(agentId)}/schedules`),
+  agentSchedules: (agentId: string) =>
+    getJSON<AgentSchedule[]>(`/api/agents/${encodeURIComponent(agentId)}/schedules`),
   stopSchedule: (scheduleId: string) =>
     deleteRequest(`/api/schedules/${encodeURIComponent(scheduleId)}`),
   providers: () => getJSON<Provider[]>('/api/providers'),

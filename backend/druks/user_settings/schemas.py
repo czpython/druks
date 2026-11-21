@@ -95,13 +95,13 @@ class AgentSettingResponse(Schema):
     timeout_source: Literal["agent", "declared", "default"]
 
 
-class AgentsAppResponse(Schema):
+class InstructionsAppResponse(Schema):
     name: str
     agents: list[AgentSettingResponse]
 
 
-class AgentsResponse(Schema):
-    apps: list[AgentsAppResponse]
+class InstructionsResponse(Schema):
+    apps: list[InstructionsAppResponse]
 
 
 class SettingsFieldResponse(Schema):

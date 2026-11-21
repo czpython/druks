@@ -1,7 +1,7 @@
 """Add agents.
 
 Revision ID: 57f5c42b7d19
-Revises: b7e2f4a91c36
+Revises: 5f4cbe1efb1b
 """
 
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "57f5c42b7d19"
-down_revision: str | Sequence[str] | None = "b7e2f4a91c36"
+down_revision: str | Sequence[str] | None = "5f4cbe1efb1b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

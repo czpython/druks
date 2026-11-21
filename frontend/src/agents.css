@@ -2,6 +2,7 @@
 .agents-head h1 { margin: 0 0 10px; font-size: 26px; font-weight: 500; }
 .agents-head p { max-width: 56ch; margin: 0; color: var(--druks-color-text-secondary); line-height: 1.6; }
 .agents-page .set-card { margin-bottom: 24px; }
+.agents-page h2 { margin: 32px 0 12px; font-size: 18px; font-weight: 500; }
 @media (max-width: 649px) {
   .agents-head { align-items: stretch; flex-direction: column; gap: 18px; }
 }

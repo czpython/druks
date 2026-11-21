@@ -8,7 +8,9 @@ import { Cost } from '../components/Common'
 import { Button } from '../components/Control'
 import { Page } from '../components/Page'
 import { StatusGlyph } from '../components/StatusGlyph'
-import { timeAway } from '../lib/format'
+import { activityDay } from '../lib/feed'
+import { timeAway, zonedParts } from '../lib/format'
+import { useTimezone } from '../lib/preferences'
 import { RUN_LABELS } from '../lib/states'
 import '../agents.css'
 
@@ -16,26 +18,28 @@ function runCost(run: RunSummary): number {
   return run.agentCalls.reduce((sum, call) => sum + (call.costUsd ?? 0), 0)
 }
 
-// Monday 00:00 in the viewer's time.
-function startOfWeek(now: Date): Date {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
-  return start
+// Monday 00:00 in the account's timezone.
+function startOfWeek(now: Date, timezone: string): string {
+  const today = zonedParts(now, timezone)
+  const weekday = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay()
+  const monday = new Date(Date.UTC(today.year, today.month - 1, today.day - ((weekday + 6) % 7)))
+  return activityDay(monday.toISOString().slice(0, 10), timezone)
 }
 
 export function AgentPage({ id, account }: { id: string; account: Account }) {
   const queryClient = useQueryClient()
-  const weekStart = startOfWeek(new Date()).toISOString()
-  const agentQuery = useQuery({ queryKey: ['configuredAgent', id], queryFn: () => api.configuredAgent(id) })
+  const timezone = useTimezone()
+  const weekStart = startOfWeek(new Date(), timezone)
+  const agentQuery = useQuery({ queryKey: ['agents', id], queryFn: () => api.agent(id) })
   const accountsQuery = useQuery({ queryKey: ['accounts'], queryFn: api.accounts })
   const schedulesQuery = useQuery({
-    queryKey: ['configuredAgentSchedules', id],
-    queryFn: () => api.configuredAgentSchedules(id),
+    queryKey: ['agentSchedules', id],
+    queryFn: () => api.agentSchedules(id),
   })
-  const runsQuery = useQuery({ queryKey: ['configuredAgentRuns', id], queryFn: () => api.configuredAgentRuns(id) })
-  const weekQuery = useQuery({
-    queryKey: ['configuredAgentRuns', id, weekStart],
-    queryFn: () => api.configuredAgentRuns(id, { since: weekStart, limit: '100' }),
+  const runsQuery = useQuery({ queryKey: ['agentRuns', id], queryFn: () => api.agentRuns(id) })
+  const costQuery = useQuery({
+    queryKey: ['agentCost', id, weekStart],
+    queryFn: () => api.agentCost(id, weekStart),
   })
   const [stopping, setStopping] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -54,22 +58,40 @@ export function AgentPage({ id, account }: { id: string; account: Account }) {
       } finally {
         setStopping(null)
         // A failed stop can mean that someone else stopped the schedule first.
-        await queryClient.invalidateQueries({ queryKey: ['configuredAgentSchedules', id] })
+        await queryClient.invalidateQueries({ queryKey: ['agentSchedules', id] })
       }
     }
+  }
+
+  if (agentQuery.isError) {
+    return (
+      <Page inset className="agents-page">
+        <p className="mcp-error" role="alert">
+          {agentQuery.error.message}
+        </p>
+        <Link className="ins-crumb-back" href="/agents">
+          ← Agents
+        </Link>
+      </Page>
+    )
   }
 
   return (
     <Page inset className="agents-page">
       <header className="agents-head">
         <div>
-          <Link href="/agents">Agents</Link>
+          <Link className="ins-crumb-back" href="/agents">
+            ← Agents
+          </Link>
           <h1>{agentQuery.data?.name}</h1>
           <p>{agentQuery.data?.description}</p>
         </div>
       </header>
-      {agentQuery.isError && <p role="alert">{agentQuery.error.message}</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p className="mcp-error" role="alert">
+          {error}
+        </p>
+      )}
 
       <h2>Schedules</h2>
       {schedulesQuery.isPending && <p role="status">Loading schedules…</p>}
@@ -125,19 +147,19 @@ export function AgentPage({ id, account }: { id: string; account: Account }) {
       )}
 
       <h2>Runs</h2>
-      {weekQuery.isSuccess && (
+      {costQuery.isSuccess && (
         <p>
-          This week: <Cost value={weekQuery.data.reduce((sum, run) => sum + runCost(run), 0)} />
+          This week: <Cost value={costQuery.data.costUsd} />
         </p>
       )}
       {runsQuery.isPending && <p role="status">Loading runs…</p>}
-      {(runsQuery.isError || weekQuery.isError) && (
+      {(runsQuery.isError || costQuery.isError) && (
         <p className="mcp-error" role="alert">
           Could not load the runs.{' '}
           <Button
             onClick={() => {
               void runsQuery.refetch()
-              void weekQuery.refetch()
+              void costQuery.refetch()
             }}
           >
             Try again
@@ -160,7 +182,9 @@ export function AgentPage({ id, account }: { id: string; account: Account }) {
             {runs.map((run) => (
               <tr key={run.id}>
                 <th scope="row">
-                  <Link href={`/runs/${run.id}`}>{run.label}</Link>
+                  <Link className="connection-name" href={`/runs/${run.id}`}>
+                    {run.label}
+                  </Link>
                 </th>
                 <td data-label="Status">
                   <StatusGlyph state={run.state} /> {run.state}

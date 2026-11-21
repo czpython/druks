@@ -10,6 +10,7 @@ import httpx
 import pytest
 from conftest import bind_ambient_session, install_service
 from druks.accounts.models import Account, PersonalAccessToken
+from druks.agents.models import Agent
 from druks.api.dependencies import request_session
 from druks.chat import service
 from druks.chat.channels.slack.channel import SlackChannel
@@ -19,7 +20,6 @@ from druks.chat.enums import ConversationSource, MessageRole
 from druks.chat.exceptions import ChannelHasNoThreadsError
 from druks.chat.models import Automation, Conversation
 from druks.chat.routes import read_file, read_thread, require_tag
-from druks.configured_agents.models import ConfiguredAgent
 from druks.core.apis.slack import SlackClient
 from druks.core.services import Slack
 from druks.core.webhooks.slack import SlackEvents, SlackInteractivity
@@ -300,7 +300,7 @@ async def test_an_agents_reply_shows_its_name_and_picture_and_the_bots_shows_nei
         harness=agent.harness,
         model=agent.model,
         is_private=agent.is_private,
-        slack_channel_id=None,
+        channel_id=None,
         picture_url="https://example.com/security.png",
     )
 
@@ -551,7 +551,7 @@ async def test_only_a_linked_persons_untagged_reply_in_a_fresh_thread_reaches_th
 
 
 async def create_agent(session, owner, name, *, is_private=False):
-    return await ConfiguredAgent.create(
+    return await Agent.create(
         session,
         owner=owner,
         name=name,
@@ -577,7 +577,7 @@ async def bind_channel(session, agent, channel_id):
         harness=agent.harness,
         model=agent.model,
         is_private=agent.is_private,
-        slack_channel_id=channel_id,
+        channel_id=channel_id,
         picture_url=agent.picture_url,
     )
     await session.commit()
@@ -674,6 +674,8 @@ async def test_a_tag_naming_no_agent_reaches_the_agent_the_person_last_wrote_to(
     ]
     late_reply = await checking.create_message(druks_db, "Looks safe.", role=MessageRole.ASSISTANT)
     late_reply.created_at = Base.utc_now() + timedelta(minutes=5)
+    report = await checking.create_message(druks_db, "Run r1 finished.", is_internal=True)
+    report.created_at = Base.utc_now() + timedelta(minutes=5)
     await druks_db.commit()
 
     await receive(room_event(text=f"<@{BOT}> and today?", ts="12.0", thread_ts="10.0"))
