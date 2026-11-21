@@ -58,6 +58,28 @@ class ConfiguredAgent(Model, Uuid7Pk):
         )
 
     @classmethod
+    async def get_for_text(cls, session: AsyncSession, text: str) -> "ConfiguredAgent | None":
+        """The agent whose whole name starts the text, in any case. The longest such
+        name wins: "Security engineer" over "Security"."""
+        lower_text = sqlalchemy.func.lower(text)
+        lower_name = sqlalchemy.func.lower(cls.name)
+        # Both sides lower in Postgres: Python lowers "İ" to two characters, Postgres
+        # to one, so a mix would never match.
+        next_character = sqlalchemy.func.substr(
+            lower_text, sqlalchemy.func.length(lower_name) + 1, 1
+        )
+        return await session.scalar(
+            select(cls)
+            .where(
+                sqlalchemy.func.starts_with(lower_text, lower_name),
+                # "Security engineers" does not name "Security engineer".
+                next_character.op("!~")("[[:alnum:]]"),
+            )
+            .order_by(sqlalchemy.func.length(cls.name).desc())
+            .limit(1)
+        )
+
+    @classmethod
     async def create(
         cls,
         session: AsyncSession,

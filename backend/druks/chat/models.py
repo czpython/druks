@@ -100,8 +100,10 @@ class Conversation(Base, Uuid7Pk):
             "account_id",
             "user_id",
             "thread_id",
+            "agent_id",
             unique=True,
             postgresql_where=text("connection_id IS NOT NULL"),
+            postgresql_nulls_not_distinct=True,
         ),
     )
 
@@ -182,10 +184,11 @@ class Conversation(Base, Uuid7Pk):
         user_phone: str,
         thread_id: str,
         is_tag_required: bool = False,
+        agent_id: str | None = None,
     ) -> "Conversation":
-        """The one conversation of a person in a thread, or in a direct chat, on a
-        channel's connection, under the account the person routes to. It keeps the name
-        the person shows now."""
+        """The one conversation of a person with an agent, or with the Bot, in a thread,
+        or in a direct chat, on a channel's connection, under the account the person
+        routes to. It keeps the name the person shows now."""
         await session.execute(
             insert(cls)
             .values(
@@ -198,10 +201,11 @@ class Conversation(Base, Uuid7Pk):
                 user_phone=user_phone,
                 thread_id=thread_id,
                 is_tag_required=is_tag_required,
+                agent_id=agent_id,
                 created_at=Base.utc_now(),
             )
             .on_conflict_do_nothing(
-                index_elements=["connection_id", "account_id", "user_id", "thread_id"],
+                index_elements=["connection_id", "account_id", "user_id", "thread_id", "agent_id"],
                 index_where=text("connection_id IS NOT NULL"),
             )
         )
@@ -211,6 +215,7 @@ class Conversation(Base, Uuid7Pk):
                 cls.account_id == account_id,
                 cls.user_id == user_id,
                 cls.thread_id == thread_id,
+                cls.agent_id.is_not_distinct_from(agent_id),
             )
         )
         if user_name:
@@ -226,13 +231,23 @@ class Conversation(Base, Uuid7Pk):
         user_id: str,
         thread_id: str,
     ) -> "Conversation | None":
-        """The conversation of a person in a thread on a channel's connection."""
+        """The conversation of a person in a thread on a channel's connection that they
+        last wrote in. An agent's late reply does not make its conversation the latest,
+        and a bare tag's empty conversation comes last."""
+        last_written_at = (
+            select(func.max(Message.created_at))
+            .where(Message.conversation_id == cls.id, Message.role == MessageRole.USER)
+            .scalar_subquery()
+        )
         return await session.scalar(
-            select(cls).where(
+            select(cls)
+            .where(
                 cls.connection_id == connection.id,
                 cls.user_id == user_id,
                 cls.thread_id == thread_id,
             )
+            .order_by(last_written_at.desc().nulls_last(), cls.id.desc())
+            .limit(1)
         )
 
     @classmethod

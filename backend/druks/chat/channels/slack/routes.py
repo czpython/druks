@@ -39,7 +39,9 @@ async def link_account(
         link_page = quote(f"/api/chat/services/slack/link/{token}?has_connected=true", safe="")
         return RedirectResponse(f"/api/oauth/slack/connect?next={link_page}")
     if linked_account and linked_account.id == account.id:
-        conversation = await SlackChannel.save_message(session, card, account, message)
+        conversation = await SlackChannel.save_message(
+            session, card, account, message, agent_id=None
+        )
         await get_client().delete(LINK_KEY.format(token=token))
         return RedirectResponse(f"/chat/{conversation.id}")
     return RedirectResponse("/chat")
@@ -71,7 +73,9 @@ async def accept_automation(session: SessionDep, automation_id: str) -> Automati
     if not automation.is_accepted:
         automation.is_accepted = True
         account = await Account.get_default(session)
-        await SlackChannel.save_message(session, card, account, automation.first_message)
+        await SlackChannel.save_message(
+            session, card, account, automation.first_message, agent_id=None
+        )
     return automation
 
 
