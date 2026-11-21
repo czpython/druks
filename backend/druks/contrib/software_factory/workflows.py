@@ -187,15 +187,22 @@ class Build(Workflow):
         if tracker := await SoftwareFactory.get_tracker():
             async with tracker:
                 blockers = await tracker.get_blocked_by(ticket["identifier"])
-                open_blockers = []
+                open_blockers, stacked_keys = [], []
                 for key, is_open in blockers.items():
-                    # A blocker whose PR is open is ready for review, so it no longer
-                    # holds the ticket even though the tracker still has it open.
                     blocker = await WorkItem.get_for_ticket_key(
                         source=ticket["source"], ticket_key=key
                     )
-                    if is_open and not (blocker and blocker.has_open_pr):
+                    # A blocker whose PR is open is ready for review, so it no longer
+                    # holds the ticket even though the tracker still has it open.
+                    if blocker and blocker.has_open_pr:
+                        if blocker.repo == item.repo:
+                            stacked_keys.append(key)
+                    elif is_open:
                         open_blockers.append(key)
+                # A build starts on one branch. With several open PRs in its repo, it
+                # waits until all but one have merged.
+                if not open_blockers and len(stacked_keys) > 1:
+                    open_blockers = stacked_keys
                 if open_blockers:
                     await item.announce("build.waiting", blockers=open_blockers)
                     raise TicketBlocked(ticket["identifier"], open_blockers)
@@ -247,6 +254,7 @@ class Build(Workflow):
                 db_session(), self._profile.get("recommended_skills", [])
             ),
             blockers=self._blockers,
+            base_branch=self._base_branch,
             journal=self.journal,
         )
         return {
@@ -274,15 +282,17 @@ class Build(Workflow):
 
     @step
     async def _load_blockers(self) -> list[dict]:
-        """Each blocker's ticket key, or its merged PR when Druks built it."""
-        source = (await self.subject).source
+        """Each blocker's ticket key, or its PR when Druks built it. The open PR in this
+        repo carries its branch."""
+        subject = await self.subject
         blockers = []
         for key in self.input.blockers:
-            item = await WorkItem.get_for_ticket_key(source=source, ticket_key=key)
-            if item and item.resolution == Resolution.MERGED:
-                blockers.append(
-                    {"repo": item.repo, "pr_number": item.pr_number, "title": item.title}
-                )
+            item = await WorkItem.get_for_ticket_key(source=subject.source, ticket_key=key)
+            if item and (item.resolution == Resolution.MERGED or item.has_open_pr):
+                blocker = {"repo": item.repo, "pr_number": item.pr_number, "title": item.title}
+                if item.has_open_pr and item.repo == subject.repo:
+                    blocker["branch"] = item.branch
+                blockers.append(blocker)
             else:
                 blockers.append({"ticket_key": key, "pr_number": None})
         return blockers
@@ -495,7 +505,11 @@ class Build(Workflow):
     async def _create_branch(self) -> None:
         # Replay keeps the branch: GitHub holds it, and a second pass would create the
         # next number.
-        await (await self.subject).create_branch()
+        await (await self.subject).create_branch(base=self._base_branch)
+
+    @property
+    def _base_branch(self) -> str | None:
+        return next((b["branch"] for b in self._blockers if "branch" in b), None)
 
     @step
     async def declare_merge_intent(self) -> bool:

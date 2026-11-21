@@ -656,7 +656,9 @@ the ticket. On Jira, a blocker is an issue link of
 the Blocks type, and it is open until its status category is Done. A blocker
 whose pull request is open does not hold the ticket. When a blocker's pull
 request opens, or when it moves to the done status, Druks reads each ticket that
-it blocks. A
+it blocks. A build starts on the branch of the open pull request of a blocker in
+its repository, and opens its pull request against that branch. With more than
+one such pull request, the ticket waits until one is left. A
 ticket at the trigger status with no other open blocker starts its build. No
 person starts that build, so it uses the account of the ticket assignee.
 **druks** board tickets do not wait for blockers.

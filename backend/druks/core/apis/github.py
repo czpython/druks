@@ -452,13 +452,13 @@ class GitHubClient:
 
         return True
 
-    async def create_branch(self, repo: str, branch: str) -> None:
-        """Create ``branch`` at the head of the default branch."""
+    async def create_branch(self, repo: str, branch: str, *, base: str | None = None) -> None:
+        """Create ``branch`` at the head of ``base``, or of the default branch."""
         owner, name = repo.split("/", 1)
-        repository = await self._github.rest.repos.async_get(owner, name)
-        head = await self._github.rest.git.async_get_ref(
-            owner, name, f"heads/{repository.parsed_data.default_branch}"
-        )
+        if not base:
+            repository = await self._github.rest.repos.async_get(owner, name)
+            base = repository.parsed_data.default_branch
+        head = await self._github.rest.git.async_get_ref(owner, name, f"heads/{base}")
         await self._github.rest.git.async_create_ref(
             owner, name, ref=f"refs/heads/{branch}", sha=head.parsed_data.object_.sha
         )
